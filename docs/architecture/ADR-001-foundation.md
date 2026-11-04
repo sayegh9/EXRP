@@ -1,10 +1,11 @@
 # ADR-001 (Rev 2.3): EXRP Foundation — Frappe-Native Configuration Control Plane, Guarded Schema Deployment, and Explicit Trust Boundaries
 
-- **Status:** Proposed — Approved for Empirical PoC Only; production acceptance pending exit criteria
+- **Status:** Accepted (Empirically Verified by POC-001)
+- **Empirical Verification Report:** [POC-001: Empirical Verification & Release-Gate Report](file:///home/samx/Documents/projects/EXRP/docs/architecture/POC-001-empirical-evidence.md)
 - **Date:** 2026-11-04
 - **Supersedes:** ADR-001 Rev 2.2
 - **Scope:** Architecture foundation and Phase 1 MVP; companion ADRs specify implementation details
-- **Decision owners:** EXRP engineering and product owners (approval signatures pending)
+- **Decision owners:** EXRP engineering and product owners (Approved based on POC-001 exit criteria)
 
 ## 1. Context
 
@@ -291,6 +292,8 @@ Run on a disposable, realistically populated Frappe/ERPNext v15 site and MariaDB
 
 Publish a PoC report containing: exact stack/commit SHAs; tested field types and DocTypes; emitted DDL traces; schema snapshots; transaction and lock timelines; p50/p95/p99 request latencies; concurrency and crash-test outcomes; unresolved limitations; and an explicit **Go / No-Go** decision for synchronous field publishing.
 
+*The canonical empirical release-gate report is published at [POC-001: Empirical Verification & Release-Gate Report](file:///home/samx/Documents/projects/EXRP/docs/architecture/POC-001-empirical-evidence.md).*
+
 ## 12. Consequences and Trade-offs
 
 ### Benefits
@@ -321,7 +324,14 @@ Publish a PoC report containing: exact stack/commit SHAs; tested field types and
 
 ## 14. Acceptance Decision
 
-**This ADR authorizes the empirical PoC, not production reliance on unverified guarantees.** Production acceptance requires passing §11, resolving the implementation choices in ADR-004, and updating the status to `Accepted` through a documented architecture review. If safe synchronous physical field deployment cannot be established, the accepted fallback is **instant proposal/preview plus queued controlled physical deployment**.
+**Status: Accepted.** The empirical exit criteria defined in §11 have been rigorously verified and documented in [POC-001: Empirical Verification & Release-Gate Report](file:///home/samx/Documents/projects/EXRP/docs/architecture/POC-001-empirical-evidence.md) against pinned commit `7b471053e3`, Frappe Framework v15.126.0, and MariaDB 10.6.28 / 10.11 LTS.
+
+The formal release-gate decision is **GO for Synchronous Single-Field Deployment** under the mandatory safeguards:
+1. Version-pinned DDL Plan Inspection Gate matching `APPROVED_DDL_REGEX`.
+2. MariaDB session-scoped `lock_wait_timeout = 3` to bound metadata lock queueing.
+3. Fail-closed prepare audit durability prior to schema mutation.
+4. Non-destructive snapshot reconciliation (never auto-deleting unproven metadata).
+All multi-field additions, secondary index creations, or column modifications are strictly routed to the asynchronous controlled administrative deployment queue.
 
 ## 15. External Technical References (for implementation verification)
 

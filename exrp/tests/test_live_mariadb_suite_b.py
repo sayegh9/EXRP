@@ -49,10 +49,10 @@ from exrp.ai_control_plane.schema_reconciler import (
 )
 
 # Database Connection Configuration
-DB_HOST = "127.0.0.1"
-DB_PORT = 3306
-DB_USER = "root"
-DB_PASS = "admin"
+DB_HOST = os.environ.get("DB_HOST", "127.0.0.1")
+DB_PORT = int(os.environ.get("DB_PORT", 3306))
+DB_USER = os.environ.get("DB_USER", "root")
+DB_PASS = os.environ.get("DB_PASS", "admin")
 DB_NAME = "exrp_poc_db"
 
 logging.basicConfig(
