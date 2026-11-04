@@ -37,6 +37,14 @@ from exrp.ai_control_plane.schema_reconciler import (
     make_bounded_lock_key,
 )
 from exrp.ai_control_plane.planner import AIConfigurationPlanner
+from exrp.ai_control_plane.policy_enforcer import (
+    PolicyType,
+    RuntimePolicy,
+    PolicyEvaluationResult,
+    RuntimePolicyViolation,
+    RuntimePolicyCatalog,
+    policy_catalog,
+)
 
 AUTHORIZED_DEPLOYMENT_ROLES: Set[str] = {
     "System Manager",
@@ -791,16 +799,120 @@ if frappe and hasattr(frappe, "whitelist"):
     apply_configuration_change = frappe.whitelist()(apply_configuration_change)
 
 
-def enforce_runtime_policies_on_validate(doc, method=None):
-    """Lifecycle hook for Document.validate"""
-    pass
+def enforce_runtime_policies_on_validate(doc, method=None, user_roles: Optional[List[str]] = None) -> PolicyEvaluationResult:
+    """
+    Lifecycle hook for Document.validate (§4.2).
+    Resolves caller roles and evaluates active runtime policies against the document.
+    Throws frappe.ValidationError (RuntimePolicyViolation) on violation.
+    """
+    if user_roles is None:
+        user_roles = get_current_user_roles()
+
+    result = policy_catalog.evaluate_validate(doc, user_roles=user_roles, raise_exception=False)
+    if not result.allowed:
+        policy_id = result.violated_policies[0] if result.violated_policies else "UNKNOWN"
+        reason = result.reasons[0] if result.reasons else "Policy validation failed"
+        msg = f"Runtime Policy Violation [{policy_id}]: {reason}"
+        if frappe and hasattr(frappe, "throw"):
+            frappe.throw(msg, exc=RuntimePolicyViolation)
+        raise RuntimePolicyViolation(msg, policy_id=policy_id, result=result)
+    return result
 
 
-def enforce_runtime_policies_on_submit(doc, method=None):
-    """Lifecycle hook for Document.before_submit"""
-    pass
+def enforce_runtime_policies_on_submit(doc, method=None, user_roles: Optional[List[str]] = None) -> PolicyEvaluationResult:
+    """
+    Lifecycle hook for Document.before_submit (§4.2).
+    Evaluates submission gates and submit-time invariants.
+    Throws frappe.ValidationError (RuntimePolicyViolation) on violation.
+    """
+    if user_roles is None:
+        user_roles = get_current_user_roles()
+
+    result = policy_catalog.evaluate_submit(doc, user_roles=user_roles, raise_exception=False)
+    if not result.allowed:
+        policy_id = result.violated_policies[0] if result.violated_policies else "UNKNOWN"
+        reason = result.reasons[0] if result.reasons else "Policy submit lock failed"
+        msg = f"Runtime Policy Violation [{policy_id}]: {reason}"
+        if frappe and hasattr(frappe, "throw"):
+            frappe.throw(msg, exc=RuntimePolicyViolation)
+        raise RuntimePolicyViolation(msg, policy_id=policy_id, result=result)
+    return result
 
 
-def enforce_runtime_policies_on_update_after_submit(doc, method=None):
-    """Lifecycle hook for Document.before_update_after_submit"""
-    pass
+def enforce_runtime_policies_on_update_after_submit(doc, method=None, user_roles: Optional[List[str]] = None) -> PolicyEvaluationResult:
+    """
+    Lifecycle hook for Document.before_update_after_submit (§4.2).
+    Prevents modifying locked or protected fields on submitted documents.
+    Throws frappe.ValidationError (RuntimePolicyViolation) on violation.
+    """
+    if user_roles is None:
+        user_roles = get_current_user_roles()
+
+    result = policy_catalog.evaluate_update_after_submit(doc, user_roles=user_roles, raise_exception=False)
+    if not result.allowed:
+        policy_id = result.violated_policies[0] if result.violated_policies else "UNKNOWN"
+        reason = result.reasons[0] if result.reasons else "Policy update-after-submit violation"
+        msg = f"Runtime Policy Violation [{policy_id}]: {reason}"
+        if frappe and hasattr(frappe, "throw"):
+            frappe.throw(msg, exc=RuntimePolicyViolation)
+        raise RuntimePolicyViolation(msg, policy_id=policy_id, result=result)
+    return result
+
+
+def get_runtime_policies(doctype: Optional[str] = None, stage: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Whitelisted RPC method: returns active runtime policies for a given DocType and lifecycle stage.
+    """
+    if doctype:
+        policies = policy_catalog.get_active_policies(doctype, stage=stage)
+    else:
+        policies = []
+        for dt in policy_catalog._policies:
+            policies.extend(policy_catalog.get_active_policies(dt, stage=stage))
+    return [p.to_dict() for p in policies]
+
+
+def register_runtime_policy(policy_data: Union[Dict[str, Any], RuntimePolicy]) -> Dict[str, Any]:
+    """
+    Registers a new runtime policy or updates an existing one.
+    """
+    if isinstance(policy_data, dict):
+        policy = RuntimePolicy(**policy_data)
+    else:
+        policy = policy_data
+    policy_catalog.register_policy(policy)
+    return {"success": True, "policy_id": policy.policy_id}
+
+
+def evaluate_document_policies(
+    doctype: str,
+    doc: Dict[str, Any],
+    stage: str = "validate",
+    user_roles: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Whitelisted RPC method: Evaluates runtime policies against a document preview
+    without saving to the database.
+    """
+    if user_roles is None:
+        user_roles = get_current_user_roles()
+    if isinstance(doc, dict):
+        doc = dict(doc)
+        doc["doctype"] = doctype
+
+    norm_stage = (stage or "validate").lower()
+    if norm_stage in ("submit", "before_submit"):
+        res = policy_catalog.evaluate_submit(doc, user_roles=user_roles, raise_exception=False)
+    elif norm_stage in ("update_after_submit", "before_update_after_submit"):
+        res = policy_catalog.evaluate_update_after_submit(doc, user_roles=user_roles, raise_exception=False)
+    else:
+        res = policy_catalog.evaluate_validate(doc, user_roles=user_roles, raise_exception=False)
+
+    return res.to_dict()
+
+
+if frappe and hasattr(frappe, "whitelist"):
+    get_runtime_policies = frappe.whitelist()(get_runtime_policies)
+    register_runtime_policy = frappe.whitelist()(register_runtime_policy)
+    evaluate_document_policies = frappe.whitelist()(evaluate_document_policies)
+
