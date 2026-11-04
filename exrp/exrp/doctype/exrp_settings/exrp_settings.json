@@ -1,0 +1,126 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-11-04 20:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "llm_provider",
+  "model_name",
+  "api_key",
+  "api_base_url",
+  "temperature",
+  "max_retries",
+  "enable_sidecar",
+  "offline_mode",
+  "strict_tier0_lock",
+  "lock_wait_timeout"
+ ],
+ "fields": [
+  {
+   "default": "Google Gemini",
+   "fieldname": "llm_provider",
+   "fieldtype": "Select",
+   "label": "LLM Provider",
+   "options": "Google Gemini\nOpenAI\nAnthropic\nCustom OpenAI-Compatible\nMock / Offline Test Mode"
+  },
+  {
+   "default": "gemini-3.8-flash",
+   "description": "e.g. gemini-3.8-flash, gemini-3.5-flash-lite, gpt-4o",
+   "fieldname": "model_name",
+   "fieldtype": "Data",
+   "label": "Model Name"
+  },
+  {
+   "description": "API key for the selected provider",
+   "fieldname": "api_key",
+   "fieldtype": "Password",
+   "label": "API Key"
+  },
+  {
+   "description": "Optional custom proxy or endpoint",
+   "fieldname": "api_base_url",
+   "fieldtype": "Data",
+   "label": "API Base URL"
+  },
+  {
+   "default": "0.2",
+   "fieldname": "temperature",
+   "fieldtype": "Float",
+   "label": "Temperature"
+  },
+  {
+   "default": "2",
+   "description": "Max self-correction retries",
+   "fieldname": "max_retries",
+   "fieldtype": "Int",
+   "label": "Max Retries"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_sidecar",
+   "fieldtype": "Check",
+   "label": "Enable Sidecar"
+  },
+  {
+   "default": "0",
+   "fieldname": "offline_mode",
+   "fieldtype": "Check",
+   "label": "Offline Mode"
+  },
+  {
+   "default": "1",
+   "fieldname": "strict_tier0_lock",
+   "fieldtype": "Check",
+   "label": "Strict Tier 0 Lock",
+   "read_only": 1
+  },
+  {
+   "default": "3",
+   "fieldname": "lock_wait_timeout",
+   "fieldtype": "Int",
+   "label": "Lock Wait Timeout"
+  }
+ ],
+ "icon": "fa fa-cog",
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-11-04 20:00:00",
+ "modified_by": "Administrator",
+ "module": "EXRP",
+ "name": "EXRP Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Finance Director",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Operations Director",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

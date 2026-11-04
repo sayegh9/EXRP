@@ -1,0 +1,965 @@
+/**
+ * EXRP Frappe Desk AI Sidecar Stylesheet (ADR-001 Rev 2.3)
+ * Modern, responsive, high-fidelity drawer interface supporting Frappe Light & Dark themes.
+ */
+
+:root {
+  --exrp-primary: var(--primary, #2490ef);
+  --exrp-primary-hover: #1b74c2;
+  --exrp-primary-light: rgba(36, 144, 239, 0.1);
+  --exrp-primary-glow: rgba(36, 144, 239, 0.35);
+  --exrp-bg: var(--card-bg, var(--fg-color, #ffffff));
+  --exrp-surface: var(--gray-50, #f8fafc);
+  --exrp-surface-hover: var(--gray-100, #f1f5f9);
+  --exrp-border: var(--border-color, #e2e8f0);
+  --exrp-text: var(--text-color, #1e293b);
+  --exrp-text-muted: var(--text-muted, #64748b);
+  --exrp-text-light: var(--text-light, #94a3b8);
+  --exrp-code-bg: #0f172a;
+  --exrp-code-text: #38bdf8;
+  --exrp-code-border: #1e293b;
+  --exrp-success: #10b981;
+  --exrp-success-light: #ecfdf5;
+  --exrp-success-border: #a7f3d0;
+  --exrp-danger: #ef4444;
+  --exrp-danger-light: #fef2f2;
+  --exrp-danger-border: #fecaca;
+  --exrp-warning: #f59e0b;
+  --exrp-warning-light: #fffbeb;
+  --exrp-warning-border: #fde68a;
+  --exrp-shadow-drawer: -8px 0 32px rgba(0, 0, 0, 0.14);
+  --exrp-shadow-card: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --exrp-shadow-launcher: 0 6px 20px var(--exrp-primary-glow);
+  --exrp-radius-sm: 6px;
+  --exrp-radius-md: 10px;
+  --exrp-radius-lg: 14px;
+  --exrp-radius-full: 9999px;
+  --exrp-transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Frappe Dark Mode Overrides */
+[data-theme="dark"],
+body.dark,
+[data-theme-mode="dark"] {
+  --exrp-bg: #111827;
+  --exrp-surface: #1f2937;
+  --exrp-surface-hover: #374151;
+  --exrp-border: #374151;
+  --exrp-text: #f9fafb;
+  --exrp-text-muted: #9ca3af;
+  --exrp-text-light: #6b7280;
+  --exrp-code-bg: #030712;
+  --exrp-code-text: #7dd3fc;
+  --exrp-code-border: #1f2937;
+  --exrp-success-light: rgba(16, 185, 129, 0.15);
+  --exrp-success-border: rgba(16, 185, 129, 0.3);
+  --exrp-danger-light: rgba(239, 68, 68, 0.15);
+  --exrp-danger-border: rgba(239, 68, 68, 0.3);
+  --exrp-warning-light: rgba(245, 158, 11, 0.15);
+  --exrp-warning-border: rgba(245, 158, 11, 0.3);
+  --exrp-shadow-drawer: -8px 0 32px rgba(0, 0, 0, 0.5);
+  --exrp-shadow-card: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+/* ==========================================================================
+   1. Floating Toggle Button (Launcher)
+   ========================================================================== */
+.exrp-sidecar-launcher {
+  position: fixed;
+  bottom: 24px;
+  right: 28px;
+  z-index: 1040;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 18px 0 14px;
+  background: var(--exrp-bg);
+  color: var(--exrp-text);
+  border: 1px solid var(--exrp-border);
+  border-radius: var(--exrp-radius-full);
+  box-shadow: var(--exrp-shadow-launcher);
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--font-stack, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  transition: var(--exrp-transition);
+  outline: none;
+  animation: exrp-subtle-glow 3.5s infinite ease-in-out;
+}
+
+.exrp-sidecar-launcher:hover {
+  transform: translateY(-2px) scale(1.02);
+  border-color: var(--exrp-primary);
+  box-shadow: 0 8px 24px var(--exrp-primary-glow);
+}
+
+.exrp-sidecar-launcher:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.exrp-launcher-icon {
+  font-size: 16px;
+  display: inline-block;
+  animation: exrp-sparkle-float 3s infinite ease-in-out;
+}
+
+.exrp-launcher-text {
+  font-weight: 600;
+}
+
+.exrp-launcher-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  background: var(--exrp-primary-light);
+  color: var(--exrp-primary);
+  border-radius: var(--exrp-radius-full);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-left: 2px;
+}
+
+@keyframes exrp-subtle-glow {
+  0%, 100% {
+    box-shadow: 0 4px 18px rgba(36, 144, 239, 0.25);
+  }
+  50% {
+    box-shadow: 0 6px 26px rgba(36, 144, 239, 0.45);
+  }
+}
+
+@keyframes exrp-sparkle-float {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-2px) rotate(8deg);
+  }
+}
+
+/* ==========================================================================
+   2. Backdrop Overlay
+   ========================================================================== */
+.exrp-sidecar-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(15, 23, 42, 0.25);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  z-index: 1045;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.exrp-sidecar-backdrop.exrp-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ==========================================================================
+   3. Slide-Out Drawer
+   ========================================================================== */
+.exrp-sidecar-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 440px;
+  max-width: 100vw;
+  height: 100vh;
+  background: var(--exrp-bg);
+  border-left: 1px solid var(--exrp-border);
+  box-shadow: var(--exrp-shadow-drawer);
+  z-index: 1050;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(105%);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
+  font-family: var(--font-stack, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  color: var(--exrp-text);
+}
+
+.exrp-sidecar-drawer.exrp-open {
+  transform: translateX(0);
+}
+
+/* ==========================================================================
+   4. Header & DocType Context Bar
+   ========================================================================== */
+.exrp-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--exrp-border);
+  background: var(--exrp-bg);
+  flex-shrink: 0;
+}
+
+.exrp-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.exrp-header-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.exrp-header-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--exrp-text);
+  line-height: 1.2;
+}
+
+.exrp-header-tagline {
+  font-size: 11px;
+  color: var(--exrp-text-muted);
+  font-weight: 500;
+}
+
+.exrp-btn-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--exrp-radius-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--exrp-text-muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  transition: var(--exrp-transition);
+}
+
+.exrp-btn-close:hover {
+  background: var(--exrp-surface);
+  color: var(--exrp-text);
+  border-color: var(--exrp-border);
+}
+
+/* Context Bar */
+.exrp-context-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: var(--exrp-surface);
+  border-bottom: 1px solid var(--exrp-border);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.exrp-context-doctype {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--exrp-text);
+}
+
+.exrp-context-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--exrp-success);
+  box-shadow: 0 0 0 2px var(--exrp-success-light);
+}
+
+.exrp-context-indicator.exrp-indicator-inactive {
+  background: var(--exrp-warning);
+  box-shadow: 0 0 0 2px var(--exrp-warning-light);
+}
+
+.exrp-doctype-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--exrp-primary-light);
+  color: var(--exrp-primary);
+  border-radius: var(--exrp-radius-full);
+  font-weight: 600;
+  font-size: 11.5px;
+}
+
+.exrp-custom-field-count {
+  font-size: 11.5px;
+  color: var(--exrp-text-muted);
+  font-weight: 500;
+}
+
+/* ==========================================================================
+   5. Chat Message Stream
+   ========================================================================== */
+.exrp-chat-stream {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  scroll-behavior: smooth;
+}
+
+.exrp-chat-stream::-webkit-scrollbar {
+  width: 5px;
+}
+.exrp-chat-stream::-webkit-scrollbar-thumb {
+  background: var(--exrp-border);
+  border-radius: var(--exrp-radius-full);
+}
+
+/* Message Rows */
+.exrp-msg-row {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+.exrp-msg-user {
+  justify-content: flex-end;
+}
+
+.exrp-msg-user .exrp-msg-bubble {
+  background: var(--exrp-primary);
+  color: #ffffff;
+  border-radius: 14px 14px 2px 14px;
+  padding: 10px 14px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  max-width: 85%;
+  word-break: break-word;
+  box-shadow: 0 2px 8px rgba(36, 144, 239, 0.25);
+}
+
+.exrp-msg-assistant {
+  justify-content: flex-start;
+}
+
+.exrp-msg-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--exrp-radius-md);
+  background: var(--exrp-surface);
+  border: 1px solid var(--exrp-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.exrp-msg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 90%;
+  width: 100%;
+}
+
+.exrp-msg-assistant .exrp-msg-bubble {
+  background: var(--exrp-surface);
+  color: var(--exrp-text);
+  border: 1px solid var(--exrp-border);
+  border-radius: 14px 14px 14px 2px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.exrp-msg-bubble p {
+  margin: 0 0 8px 0;
+}
+.exrp-msg-bubble p:last-child {
+  margin-bottom: 0;
+}
+
+/* Quick Prompt Suggestions */
+.exrp-quick-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.exrp-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  background: var(--exrp-bg);
+  border: 1px solid var(--exrp-border);
+  border-radius: var(--exrp-radius-full);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--exrp-text);
+  cursor: pointer;
+  transition: var(--exrp-transition);
+}
+
+.exrp-chip-btn:hover {
+  background: var(--exrp-surface-hover);
+  border-color: var(--exrp-primary);
+  color: var(--exrp-primary);
+  transform: translateY(-1px);
+}
+
+/* Loading Typing Indicator */
+.exrp-loading-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--exrp-surface);
+  border: 1px solid var(--exrp-border);
+  border-radius: var(--exrp-radius-md);
+  width: fit-content;
+}
+
+.exrp-dots-loader {
+  display: flex;
+  gap: 4px;
+}
+
+.exrp-dots-loader span {
+  width: 6px;
+  height: 6px;
+  background: var(--exrp-primary);
+  border-radius: 50%;
+  display: inline-block;
+  animation: exrp-dots-pulse 1.4s infinite ease-in-out both;
+}
+
+.exrp-dots-loader span:nth-child(1) { animation-delay: -0.32s; }
+.exrp-dots-loader span:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes exrp-dots-pulse {
+  0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+.exrp-loading-text {
+  font-size: 12px;
+  color: var(--exrp-text-muted);
+  font-weight: 500;
+}
+
+/* ==========================================================================
+   6. Interactive Proposal Card
+   ========================================================================== */
+.exrp-proposal-card {
+  width: 100%;
+  background: var(--exrp-bg);
+  border: 1px solid var(--exrp-border);
+  border-radius: var(--exrp-radius-lg);
+  box-shadow: var(--exrp-shadow-card);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: var(--exrp-transition);
+}
+
+.exrp-card-header {
+  padding: 12px 14px;
+  background: var(--exrp-surface);
+  border-bottom: 1px solid var(--exrp-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.exrp-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.exrp-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--exrp-text);
+}
+
+.exrp-intent-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: var(--exrp-radius-sm);
+  background: rgba(36, 144, 239, 0.12);
+  color: var(--exrp-primary);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.exrp-card-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Summary & Rationale */
+.exrp-proposal-summary {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--exrp-text);
+  line-height: 1.4;
+}
+
+.exrp-proposal-rationale {
+  padding: 8px 12px;
+  background: var(--exrp-surface);
+  border-left: 3px solid var(--exrp-primary);
+  border-radius: 0 var(--exrp-radius-sm) var(--exrp-radius-sm) 0;
+  font-size: 12px;
+  color: var(--exrp-text-muted);
+  line-height: 1.45;
+}
+
+.exrp-rationale-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--exrp-primary);
+  margin-bottom: 2px;
+}
+
+/* Field Definition Table */
+.exrp-field-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--exrp-border);
+  border-radius: var(--exrp-radius-sm);
+}
+
+.exrp-field-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  text-align: left;
+}
+
+.exrp-field-table th {
+  background: var(--exrp-surface);
+  padding: 6px 10px;
+  font-weight: 600;
+  color: var(--exrp-text-muted);
+  border-bottom: 1px solid var(--exrp-border);
+  white-space: nowrap;
+}
+
+.exrp-field-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--exrp-border);
+  color: var(--exrp-text);
+  white-space: nowrap;
+}
+
+.exrp-field-table tr:last-child td {
+  border-bottom: none;
+}
+
+.exrp-code-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: var(--exrp-primary);
+  font-weight: 600;
+}
+
+/* 2-Axis Policy Gate Badge */
+.exrp-policy-gate-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--exrp-radius-md);
+  border: 1px solid var(--exrp-border);
+  background: var(--exrp-surface);
+}
+
+.exrp-policy-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.exrp-gate-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: var(--exrp-radius-full);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.exrp-gate-badge.approved {
+  background: var(--exrp-success-light);
+  color: var(--exrp-success);
+  border: 1px solid var(--exrp-success-border);
+}
+
+.exrp-gate-badge.rejected {
+  background: var(--exrp-danger-light);
+  color: var(--exrp-danger);
+  border: 1px solid var(--exrp-danger-border);
+}
+
+.exrp-gate-axes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.exrp-axis-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  background: var(--exrp-bg);
+  border: 1px solid var(--exrp-border);
+  border-radius: var(--exrp-radius-sm);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--exrp-text-muted);
+}
+
+/* DDL Plan Gate Inspection Card */
+.exrp-ddl-plan-box {
+  background: var(--exrp-code-bg);
+  border: 1px solid var(--exrp-code-border);
+  border-radius: var(--exrp-radius-md);
+  overflow: hidden;
+}
+
+.exrp-ddl-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.exrp-ddl-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0.02em;
+}
+
+.exrp-ddl-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: var(--exrp-radius-sm);
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+}
+
+.exrp-ddl-code {
+  margin: 0;
+  padding: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--exrp-code-text);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+}
+
+/* Preview Fidelity Notice */
+.exrp-fidelity-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--exrp-warning-light);
+  border: 1px solid var(--exrp-warning-border);
+  border-radius: var(--exrp-radius-md);
+  font-size: 11px;
+  color: var(--exrp-text);
+  line-height: 1.4;
+}
+
+.exrp-fidelity-icon {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+/* Proposal Card Actions */
+.exrp-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--exrp-surface);
+  border-top: 1px solid var(--exrp-border);
+}
+
+.exrp-btn-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: var(--exrp-radius-md);
+  cursor: pointer;
+  transition: var(--exrp-transition);
+  border: 1px solid transparent;
+}
+
+.exrp-btn-deploy {
+  background: var(--exrp-primary);
+  color: #ffffff;
+}
+
+.exrp-btn-deploy:hover {
+  background: var(--exrp-primary-hover);
+  box-shadow: 0 4px 12px var(--exrp-primary-glow);
+}
+
+.exrp-btn-dismiss {
+  background: transparent;
+  color: var(--exrp-text-muted);
+  border-color: var(--exrp-border);
+}
+
+.exrp-btn-dismiss:hover {
+  background: var(--exrp-surface-hover);
+  color: var(--exrp-text);
+}
+
+/* ==========================================================================
+   7. 4-Stage Deployment Progress Tracker
+   ========================================================================== */
+.exrp-deployment-tracker {
+  padding: 14px;
+  background: var(--exrp-surface);
+  border-top: 1px solid var(--exrp-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.exrp-tracker-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--exrp-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.exrp-stage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.exrp-stage-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--exrp-text-muted);
+  transition: var(--exrp-transition);
+}
+
+.exrp-stage-item.in-progress {
+  color: var(--exrp-primary);
+  font-weight: 600;
+}
+
+.exrp-stage-item.completed {
+  color: var(--exrp-success);
+  font-weight: 600;
+}
+
+.exrp-stage-item.failed {
+  color: var(--exrp-danger);
+  font-weight: 600;
+}
+
+.exrp-stage-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  background: var(--exrp-bg);
+  border: 1px solid var(--exrp-border);
+  flex-shrink: 0;
+}
+
+.exrp-stage-item.in-progress .exrp-stage-icon {
+  border-color: var(--exrp-primary);
+  color: var(--exrp-primary);
+  border-top-color: transparent;
+  animation: exrp-spin 0.8s linear infinite;
+}
+
+.exrp-stage-item.completed .exrp-stage-icon {
+  background: var(--exrp-success);
+  border-color: var(--exrp-success);
+  color: #ffffff;
+}
+
+.exrp-stage-item.failed .exrp-stage-icon {
+  background: var(--exrp-danger);
+  border-color: var(--exrp-danger);
+  color: #ffffff;
+}
+
+@keyframes exrp-spin {
+  to { transform: rotate(360deg); }
+}
+
+.exrp-deploy-success-box {
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: var(--exrp-success-light);
+  border: 1px solid var(--exrp-success-border);
+  border-radius: var(--exrp-radius-md);
+  font-size: 12px;
+  color: var(--exrp-success);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ==========================================================================
+   8. Prompt Input Bar
+   ========================================================================== */
+.exrp-input-bar {
+  padding: 14px 18px;
+  border-top: 1px solid var(--exrp-border);
+  background: var(--exrp-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.exrp-input-wrapper {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  background: var(--exrp-surface);
+  border: 1px solid var(--exrp-border);
+  border-radius: var(--exrp-radius-lg);
+  padding: 8px 10px;
+  transition: var(--exrp-transition);
+}
+
+.exrp-input-wrapper:focus-within {
+  border-color: var(--exrp-primary);
+  box-shadow: 0 0 0 3px var(--exrp-primary-light);
+  background: var(--exrp-bg);
+}
+
+.exrp-prompt-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--exrp-text);
+  line-height: 1.4;
+  resize: none;
+  max-height: 120px;
+  min-height: 24px;
+}
+
+.exrp-prompt-input::placeholder {
+  color: var(--exrp-text-light);
+}
+
+.exrp-send-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--exrp-radius-md);
+  background: var(--exrp-primary);
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--exrp-transition);
+  flex-shrink: 0;
+}
+
+.exrp-send-btn:hover:not(:disabled) {
+  background: var(--exrp-primary-hover);
+  transform: scale(1.05);
+}
+
+.exrp-send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.exrp-send-icon {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+.exrp-input-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--exrp-text-light);
+  padding: 0 4px;
+}
+
+/* ==========================================================================
+   9. Mobile & Responsive Layout
+   ========================================================================== */
+@media (max-width: 640px) {
+  .exrp-sidecar-drawer {
+    width: 100vw;
+    border-left: none;
+  }
+  .exrp-sidecar-launcher {
+    bottom: 18px;
+    right: 18px;
+    height: 40px;
+    padding: 0 14px 0 10px;
+    font-size: 12.5px;
+  }
+  .exrp-card-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .exrp-btn-action {
+    width: 100%;
+  }
+}
