@@ -15,6 +15,10 @@ app_include_js = [
     "/assets/exrp/js/ai_sidecar.bundle.js"
 ]
 
+app_include_css = [
+    "/assets/exrp/css/ai_sidecar.css"
+]
+
 # Supported Document Lifecycle hooks for Runtime Policy Enforcement (§4.2)
 # Applies to supported application write paths (Desk, REST Document API, and background jobs)
 doc_events = {

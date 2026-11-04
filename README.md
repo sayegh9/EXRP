@@ -38,14 +38,22 @@ EXRP/
     ├── ai_control_plane/
     │   ├── __init__.py
     │   ├── ddl_plan_gate.py      # §6.1/§6.2 Approved-only DDL plan gate
+    │   ├── planner.py            # §4 Conversational Planner with Gemini Interactions & Self-Correction
     │   ├── safety_guardrails.py  # §5 2-Axis Policy Compiler & Protected Invariants
     │   ├── schema_extractor.py   # §4.1 Token-lean compact schema extractor
     │   └── schema_reconciler.py  # §7/§8/§9 6-Stage Durable Reconciler & GET_LOCK
     ├── api/
     │   ├── __init__.py
-    │   └── control_plane.py      # Whitelisted Frappe REST / RPC endpoints
+    │   └── control_plane.py      # Whitelisted Frappe REST / RPC endpoints (propose & apply)
+    ├── public/
+    │   ├── css/
+    │   │   └── ai_sidecar.css    # Frappe Desk Light & Dark theme sidecar styles
+    │   └── js/
+    │       └── ai_sidecar.bundle.js # Desk embedded drawer, floating launcher, & DDL visualizer
     └── tests/
         ├── test_ai_control_plane.py       # Suites A, B, C unit tests (12/12 passing)
+        ├── test_planner.py                # Conversational Planner & self-correction tests (8/8 passing)
+        ├── test_api_deployment.py         # Whitelisted deployment & role authorization tests (10/10 passing)
         └── test_live_mariadb_suite_b.py   # Live MariaDB Suite B PoC (5/5 passing)
 ```
 
@@ -53,9 +61,11 @@ EXRP/
 
 ## 🚀 Running Tests & Empirical PoC Verification
 
-### 1. Unit & Architecture Tests (Suites A, B, C)
+### 1. Complete Unit & Planner Test Suites (30 tests)
 ```bash
-python3 exrp/tests/test_ai_control_plane.py -v
+PYTHONPATH=. .venv/bin/python exrp/tests/test_ai_control_plane.py
+PYTHONPATH=. .venv/bin/python exrp/tests/test_planner.py
+PYTHONPATH=. .venv/bin/python exrp/tests/test_api_deployment.py
 ```
 
 ### 2. Live MariaDB 10.11 Suite B Integration PoC

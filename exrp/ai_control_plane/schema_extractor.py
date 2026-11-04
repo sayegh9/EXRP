@@ -10,9 +10,21 @@ import json
 
 def get_compact_doctype_schema(doctype_meta: Any) -> Dict[str, Any]:
     """
-    Given a Frappe DocType meta object or dictionary, transforms it into
+    Given a Frappe DocType name, meta object, or dictionary, transforms it into
     a lean, structured JSON schema containing only semantic fields.
     """
+    if isinstance(doctype_meta, str):
+        doctype_name = doctype_meta
+        doctype_meta = None
+        try:
+            import frappe
+            if hasattr(frappe, "get_meta"):
+                doctype_meta = frappe.get_meta(doctype_name)
+        except Exception:
+            doctype_meta = None
+        if doctype_meta is None:
+            doctype_meta = {"name": doctype_name, "module": "Core", "fields": []}
+
     fields_summary = []
     
     # Extract fields either from object or dict

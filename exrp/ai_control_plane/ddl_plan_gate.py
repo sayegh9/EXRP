@@ -28,7 +28,7 @@ class DDLPlanInspection:
 
 # ADR-001 Rev 2.3 §6.1/§6.2 Approval Regex
 APPROVED_DDL_REGEX = re.compile(
-    r"^ALTER TABLE `tab[A-Za-z0-9_ ]+` ADD COLUMN `custom_[a-z0-9_]+` [A-Za-z0-9_() ]+$"
+    r"^ALTER TABLE `tab[A-Za-z0-9_ ]+` ADD COLUMN `custom_[a-z0-9_]+` [A-Za-z0-9_() ']+$"
 )
 
 # MariaDB v15 Type Mapping matching Frappe v15 mariadb/database.py

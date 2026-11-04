@@ -12,6 +12,12 @@ from .schema_reconciler import (
     IdempotencyConflictError,
     make_bounded_lock_key,
 )
+from .planner import (
+    ProposedFieldChange,
+    ConfigurationProposal,
+    PlannerResult,
+    AIConfigurationPlanner,
+)
 
 __all__ = [
     "get_compact_doctype_schema",
@@ -24,4 +30,8 @@ __all__ = [
     "ExhaustiveSnapshot",
     "IdempotencyConflictError",
     "make_bounded_lock_key",
+    "ProposedFieldChange",
+    "ConfigurationProposal",
+    "PlannerResult",
+    "AIConfigurationPlanner",
 ]
