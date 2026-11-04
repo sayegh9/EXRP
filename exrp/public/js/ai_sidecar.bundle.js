@@ -9,14 +9,10 @@
   'use strict';
 
   // Ensure frappe namespace exists
-  if (typeof window.frappe === 'undefined') {
-    window.frappe = {};
-  }
-  if (typeof window.frappe.provide === 'function') {
+  window.exrp = window.exrp || {};
+  window.exrp.sidecar = window.exrp.sidecar || {};
+  if (typeof window.frappe !== 'undefined' && typeof window.frappe.provide === 'function') {
     window.frappe.provide('exrp.sidecar');
-  } else {
-    window.exrp = window.exrp || {};
-    window.exrp.sidecar = window.exrp.sidecar || {};
   }
 
   /**
@@ -33,6 +29,23 @@
   }
 
   /**
+   * Safe Frappe translation helper
+   */
+  const __ = (typeof window.__ === 'function')
+    ? window.__
+    : (window.frappe && typeof window.frappe.__ === 'function')
+      ? window.frappe.__
+      : function (str, params) {
+          if (!params) return str;
+          if (Array.isArray(params)) {
+            let res = str;
+            params.forEach((p, i) => { res = res.replace(`{${i}}`, p); });
+            return res;
+          }
+          return str;
+        };
+
+  /**
    * Main EXRPAISidecar Class
    */
   class EXRPAISidecar {
@@ -44,6 +57,8 @@
       this.isDeploying = false;
       this.messages = [];
       this.activeProposal = null;
+      this.activePreviewCardId = null;
+      this.activePreviewElement = null;
 
       // DOM Elements
       this.launcherEl = null;
@@ -288,6 +303,7 @@
 
     close() {
       this.isOpen = false;
+      this.clearInPlaceFormPreview();
       this.drawerEl.classList.remove('exrp-open');
       this.backdropEl.classList.remove('exrp-visible');
     }
@@ -361,6 +377,7 @@
       const previousDocType = this.activeDocType;
       this.updateContext();
       if (previousDocType !== this.activeDocType && this.activeDocType) {
+        this.clearInPlaceFormPreview();
         this.appendSystemNotice(`Context switched to <strong>${escapeHtml(this.activeDocType)}</strong>.`);
       }
     }
@@ -586,6 +603,229 @@
     }
 
     /**
+     * Injects an in-place visual form preview into cur_frm layout (ADR-001 Rev 2.3 §4.1)
+     * Inserts at designated insert_after position without modifying cur_frm.doc or marking dirty.
+     *
+     * @param {Object} proposal Proposal payload containing target_doctype and field changes
+     * @returns {boolean} True if successfully injected, false otherwise
+     */
+    injectInPlaceFormPreview(proposal) {
+      if (!proposal) return false;
+
+      // Extract changes and field definition
+      const changes = proposal.changes || (proposal.fieldname ? [proposal] : []);
+      const fieldDef = changes[0] || {};
+      const targetDocType = proposal.target_doctype || proposal.doctype || this.activeDocType;
+
+      // Verify active DocType form is open
+      if (!window.cur_frm || !window.cur_frm.doctype) {
+        if (window.frappe && typeof window.frappe.msgprint === 'function') {
+          window.frappe.msgprint({
+            title: __('Form Context Required'),
+            message: __('Please open a {0} document form to preview this field in-place.', [escapeHtml(targetDocType || 'DocType')]),
+            indicator: 'orange',
+          });
+        }
+        return false;
+      }
+
+      // Verify active form matches target DocType
+      if (targetDocType && window.cur_frm.doctype !== targetDocType) {
+        if (window.frappe && typeof window.frappe.msgprint === 'function') {
+          window.frappe.msgprint({
+            title: __('DocType Mismatch'),
+            message: __('Current form is {0}, but the proposed field is for {1}. Please navigate to {1} to preview.', [escapeHtml(window.cur_frm.doctype), escapeHtml(targetDocType)]),
+            indicator: 'orange',
+          });
+        }
+        return false;
+      }
+
+      // Clear any existing preview before injecting
+      this.clearInPlaceFormPreview();
+
+      const fieldname = fieldDef.fieldname || 'custom_preview_field';
+      const label = fieldDef.label || fieldname;
+      const fieldtype = fieldDef.fieldtype || 'Data';
+      const options = fieldDef.options || '';
+      const reqd = Boolean(fieldDef.reqd);
+      const insertAfter = fieldDef.insert_after || proposal.insert_after;
+      const description = fieldDef.description || 'Isolated interactive preview. Values entered here are not saved to the document.';
+
+      // Generate input control matching proposed fieldtype
+      let inputControlHtml = '';
+      if (fieldtype === 'Select') {
+        let opts = [];
+        if (Array.isArray(options)) {
+          opts = options;
+        } else if (typeof options === 'string') {
+          opts = options.split('\n').map((s) => s.trim()).filter(Boolean);
+        }
+        inputControlHtml = `
+          <select class="form-control" data-preview-field="${escapeHtml(fieldname)}">
+            <option value="">Select ${escapeHtml(label)}...</option>
+            ${opts.map((opt) => `<option value="${escapeHtml(opt)}">${escapeHtml(opt)}</option>`).join('')}
+          </select>
+        `;
+      } else if (fieldtype === 'Check') {
+        inputControlHtml = `
+          <div class="checkbox" style="margin-top: 4px;">
+            <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
+              <input type="checkbox" style="width: 16px; height: 16px; cursor: pointer;" data-preview-field="${escapeHtml(fieldname)}">
+              <span style="font-weight: 500;">${escapeHtml(label)}</span>
+            </label>
+          </div>
+        `;
+      } else if (fieldtype === 'Date') {
+        const todayIso = new Date().toISOString().slice(0, 10);
+        inputControlHtml = `
+          <input type="date" class="form-control" value="${todayIso}" data-preview-field="${escapeHtml(fieldname)}">
+        `;
+      } else if (fieldtype === 'Int' || fieldtype === 'Float' || fieldtype === 'Currency') {
+        inputControlHtml = `
+          <input type="number" class="form-control" placeholder="0.00" step="any" data-preview-field="${escapeHtml(fieldname)}">
+        `;
+      } else if (fieldtype === 'Text' || fieldtype === 'Small Text' || fieldtype === 'Long Text') {
+        inputControlHtml = `
+          <textarea class="form-control" rows="2" placeholder="Type ${escapeHtml(label)} here..." data-preview-field="${escapeHtml(fieldname)}"></textarea>
+        `;
+      } else {
+        // Default: Data / standard text input
+        inputControlHtml = `
+          <input type="text" class="form-control" placeholder="Type ${escapeHtml(label)} here to test preview..." autocomplete="off" data-preview-field="${escapeHtml(fieldname)}">
+        `;
+      }
+
+      // Create preview wrapper DOM element
+      const wrapperEl = document.createElement('div');
+      wrapperEl.className = 'exrp-form-preview-wrapper';
+      wrapperEl.id = 'exrp-in-place-form-preview';
+      wrapperEl.setAttribute('data-exrp-preview', fieldname);
+
+      wrapperEl.innerHTML = `
+        <div class="exrp-form-preview-header">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span class="exrp-preview-badge">[EXRP PREVIEW - NOT SAVED]</span>
+            <span class="exrp-preview-hint">Testing sandbox · Zero schema or document mutation</span>
+          </div>
+          <button type="button" class="exrp-preview-close-btn" title="Exit Visual Preview" aria-label="Exit Visual Preview">✕</button>
+        </div>
+        <div class="frappe-control form-group" style="margin-bottom: 0;">
+          ${
+            fieldtype !== 'Check'
+              ? `<div class="clearfix" style="margin-bottom: 4px;">
+                  <label class="control-label" style="font-size: 12px; font-weight: 600; color: var(--text-color, #1e293b); margin-bottom: 0;">
+                    ${escapeHtml(label)}
+                    ${reqd ? '<span class="text-danger" style="color: var(--exrp-danger, #ef4444); margin-left: 2px;">*</span>' : ''}
+                  </label>
+                </div>`
+              : ''
+          }
+          <div class="control-input-wrapper">
+            ${inputControlHtml}
+          </div>
+          <div class="help-box small text-muted" style="margin-top: 4px; font-size: 11px; color: var(--text-muted, #64748b);">
+            ${escapeHtml(description)}
+          </div>
+        </div>
+      `;
+
+      // Isolate preview input events so Frappe's cur_frm change/input listeners are NOT triggered
+      // and cur_frm.dirty() is NEVER called
+      wrapperEl.addEventListener('input', (e) => e.stopPropagation());
+      wrapperEl.addEventListener('change', (e) => e.stopPropagation());
+      wrapperEl.addEventListener('keydown', (e) => e.stopPropagation());
+
+      // Bind close button on wrapper
+      const closeBtn = wrapperEl.querySelector('.exrp-preview-close-btn');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.clearInPlaceFormPreview();
+        });
+      }
+
+      // Resolve insertion target in cur_frm
+      let anchorEl = null;
+
+      // 1. Try resolving via cur_frm.fields_dict[insertAfter]
+      if (insertAfter && window.cur_frm.fields_dict && window.cur_frm.fields_dict[insertAfter]) {
+        const refField = window.cur_frm.fields_dict[insertAfter];
+        anchorEl = (refField.$wrapper && refField.$wrapper[0]) || refField.wrapper || (refField.$wrapper && refField.$wrapper.get ? refField.$wrapper.get(0) : null);
+      }
+
+      // 2. Try resolving via data-fieldname attribute within cur_frm wrapper or document
+      if (!anchorEl && insertAfter) {
+        const scope = window.cur_frm.wrapper || document;
+        anchorEl = scope.querySelector(`[data-fieldname="${insertAfter}"]`);
+      }
+
+      // 3. Fallback: find the first visible field to insert after
+      if (!anchorEl && window.cur_frm.fields_dict) {
+        const fieldList = Object.values(window.cur_frm.fields_dict);
+        for (const f of fieldList) {
+          if (f && f.df && !f.df.hidden && f.df.fieldtype !== 'Section Break' && f.df.fieldtype !== 'Column Break') {
+            const el = (f.$wrapper && f.$wrapper[0]) || f.wrapper || (f.$wrapper && f.$wrapper.get ? f.$wrapper.get(0) : null);
+            if (el && el.parentNode) {
+              anchorEl = el;
+              break;
+            }
+          }
+        }
+      }
+
+      // Insert into DOM
+      if (anchorEl && anchorEl.parentNode) {
+        anchorEl.insertAdjacentElement('afterend', wrapperEl);
+      } else {
+        // Fallback: append inside active form layout or body
+        const formBody =
+          (window.cur_frm.layout && (window.cur_frm.layout.wrapper || window.cur_frm.layout.body)) ||
+          (window.cur_frm.wrapper && window.cur_frm.wrapper.querySelector('.form-layout, .form-page, .form-section')) ||
+          document.querySelector('.form-layout .section-body') ||
+          document.querySelector('.form-layout') ||
+          document.querySelector('.page-body') ||
+          window.cur_frm.wrapper;
+
+        if (formBody) {
+          formBody.appendChild(wrapperEl);
+        } else {
+          return false;
+        }
+      }
+
+      this.activePreviewElement = wrapperEl;
+
+      // Smooth scroll preview into view
+      try {
+        wrapperEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } catch (err) {
+        // ignore scroll error in test environments
+      }
+
+      return true;
+    }
+
+    /**
+     * Cleanly removes any active in-place form preview elements without
+     * touching cur_frm.doc or marking the document dirty.
+     */
+    clearInPlaceFormPreview() {
+      const existing = document.querySelectorAll('.exrp-form-preview-wrapper, #exrp-in-place-form-preview');
+      existing.forEach((el) => el.remove());
+
+      // Reset all preview buttons in sidecar chat drawer
+      document.querySelectorAll('.exrp-btn-preview').forEach((btn) => {
+        btn.innerHTML = '👁️ Preview on Form';
+        btn.classList.remove('exrp-preview-active');
+      });
+
+      this.activePreviewCardId = null;
+      this.activePreviewElement = null;
+    }
+
+    /**
      * Renders high-fidelity Interactive Proposal Card
      */
     renderProposalCard(data, doctype) {
@@ -714,6 +954,7 @@
               ${
                 isApproved
                   ? `<div class="exrp-card-actions">
+                      <button type="button" class="exrp-btn-action exrp-btn-preview" id="${cardId}-btn-preview" title="Test field preview in-place on current form">👁️ Preview on Form</button>
                       <button type="button" class="exrp-btn-action exrp-btn-dismiss" id="${cardId}-btn-dismiss">Dismiss</button>
                       <button type="button" class="exrp-btn-action exrp-btn-deploy" id="${cardId}-btn-deploy">🚀 Deploy to Production</button>
                     </div>`
@@ -729,22 +970,42 @@
       this.chatStreamEl.appendChild(cardWrapper);
       this.scrollToBottom();
 
-      // Bind Dismiss & Deploy buttons
+      // Bind Preview, Dismiss & Deploy buttons
       const cardEl = cardWrapper.querySelector(`#${cardId}`);
+      const previewBtn = cardEl.querySelector(`#${cardId}-btn-preview`);
       const dismissBtn = cardEl.querySelector(`#${cardId}-btn-dismiss`);
       const deployBtn = cardEl.querySelector(`#${cardId}-btn-deploy`);
 
+      if (previewBtn) {
+        previewBtn.addEventListener('click', () => {
+          if (this.activePreviewCardId === cardId) {
+            this.clearInPlaceFormPreview();
+          } else {
+            this.clearInPlaceFormPreview();
+            const injected = this.injectInPlaceFormPreview(proposal);
+            if (injected) {
+              this.activePreviewCardId = cardId;
+              previewBtn.innerHTML = '✕ Exit Preview';
+              previewBtn.classList.add('exrp-preview-active');
+            }
+          }
+        });
+      }
+
       if (dismissBtn) {
         dismissBtn.addEventListener('click', () => {
+          this.clearInPlaceFormPreview();
           cardWrapper.style.opacity = '0.5';
           dismissBtn.textContent = 'Dismissed';
           dismissBtn.disabled = true;
+          if (previewBtn) previewBtn.style.display = 'none';
           if (deployBtn) deployBtn.style.display = 'none';
         });
       }
 
       if (deployBtn) {
         deployBtn.addEventListener('click', () => {
+          this.clearInPlaceFormPreview();
           this.executeDurableDeployment(cardId, doctype, proposal, fieldDef);
         });
       }
@@ -819,11 +1080,126 @@
           this.isDeploying = false;
           this.sendBtnEl.disabled = !this.inputEl.value.trim();
 
+          const deploymentId = (res && res.deployment_id) || (proposal && proposal.deployment_id) || ('dep_' + Math.random().toString(36).substring(2, 10));
+          const isPropertySetter = Boolean(
+            (proposal && (proposal.intent === 'property_setter' || proposal.intent === 'update_field_property' || proposal.change_type === 'property_setter' || proposal.operation === 'property_setter')) ||
+            (fieldDef && (fieldDef.property || fieldDef.property_type))
+          );
+
           resultBox.innerHTML = `
             <div class="exrp-deploy-success-box">
-              <span>✓ Field <code>${escapeHtml(fieldDef.fieldname || 'custom_field')}</code> deployed live to production!</span>
+              <div class="exrp-deploy-success-details">
+                <div class="exrp-deploy-success-msg">
+                  <span>✓ ${isPropertySetter ? 'Property Setter' : 'Custom Field'} <code>${escapeHtml(fieldDef.fieldname || 'custom_field')}</code> deployed live to production!</span>
+                  <span class="exrp-quarantine-badge" id="${cardId}-quarantine-badge" style="display: none;"></span>
+                </div>
+                <button type="button" class="exrp-btn-action exrp-btn-revert" id="${cardId}-btn-revert" title="Revert or quarantine this configuration change safely" data-deployment-id="${escapeHtml(deploymentId)}">
+                  ↩️ Revert Changes
+                </button>
+              </div>
             </div>
           `;
+
+          // Bind 1-Click Rollback / Quarantine button handler
+          const revertBtn = resultBox.querySelector(`#${cardId}-btn-revert`);
+          if (revertBtn) {
+            revertBtn.addEventListener('click', () => {
+              const confirmMessage = isPropertySetter
+                ? 'This will restore the field property to its original baseline state.'
+                : 'This will quarantine and hide the field (hidden=1) preserving all historical data without dropping database columns.';
+
+              const executeRevert = () => {
+                revertBtn.disabled = true;
+                revertBtn.innerHTML = '⏳ Reverting...';
+
+                const onRevertSuccess = (revertResult) => {
+                  revertBtn.innerHTML = '✓ Reverted';
+                  revertBtn.classList.add('exrp-reverted');
+                  revertBtn.disabled = true;
+
+                  const badgeEl = resultBox.querySelector(`#${cardId}-quarantine-badge`);
+                  if (badgeEl) {
+                    badgeEl.textContent = isPropertySetter ? 'Restored Baseline' : 'Quarantined (hidden=1)';
+                    badgeEl.style.display = 'inline-flex';
+                  }
+
+                  // 1. Triggers cur_frm.reload_doc()
+                  if (window.cur_frm && window.cur_frm.doctype === doctype && typeof window.cur_frm.reload_doc === 'function') {
+                    window.cur_frm.reload_doc();
+                  }
+
+                  // 2. Updates context count
+                  this.updateContext();
+
+                  // 3. Alerts user
+                  if (window.frappe && typeof window.frappe.show_alert === 'function') {
+                    window.frappe.show_alert({
+                      message: __('EXRP: Configuration change reverted and quarantined successfully.'),
+                      indicator: 'orange',
+                    });
+                  }
+
+                  this.appendAssistantMessage(
+                    `↩️ <strong>Rollback Executed:</strong> Configuration for <code>${escapeHtml(fieldDef.fieldname || doctype)}</code> has been safely reverted. ${
+                      isPropertySetter
+                        ? 'Field property restored to its original baseline state.'
+                        : 'Custom field marked <code>hidden=1, reqd=0</code> (quarantined; historical DB columns preserved without drops).'
+                    }`
+                  );
+                };
+
+                const onRevertFailure = (err) => {
+                  revertBtn.disabled = false;
+                  revertBtn.innerHTML = '↩️ Revert Changes';
+                  const msg = (err && (err.message || err.reason)) || 'Failed to revert configuration change.';
+                  if (window.frappe && typeof window.frappe.msgprint === 'function') {
+                    window.frappe.msgprint({
+                      title: __('Revert Blocked'),
+                      message: __(msg),
+                      indicator: 'red',
+                    });
+                  } else {
+                    alert(`Revert Failed: ${msg}`);
+                  }
+                };
+
+                // Backend RPC call
+                if (window.frappe && typeof window.frappe.call === 'function') {
+                  window.frappe.call({
+                    method: 'exrp.api.control_plane.revert_configuration_change',
+                    args: {
+                      deployment_id: deploymentId,
+                    },
+                    callback: (r) => {
+                      const outcome = r ? r.message : null;
+                      if (outcome && (outcome.status === 'REVERTED' || outcome.status === 'QUARANTINED' || outcome.success !== false)) {
+                        onRevertSuccess(outcome);
+                      } else {
+                        onRevertFailure(outcome || { message: 'Revert rejected by control plane' });
+                      }
+                    },
+                    error: (e) => {
+                      onRevertFailure(e);
+                    },
+                  });
+                } else {
+                  // Standalone / offline mock fallback
+                  setTimeout(() => {
+                    onRevertSuccess({ status: 'QUARANTINED', success: true });
+                  }, 500);
+                }
+              };
+
+              // Native Frappe confirmation dialog
+              if (window.frappe && typeof window.frappe.confirm === 'function') {
+                window.frappe.confirm(confirmMessage, executeRevert);
+              } else {
+                if (window.confirm(confirmMessage)) {
+                  executeRevert();
+                }
+              }
+            });
+          }
 
           // Show Frappe native alert
           if (window.frappe && typeof window.frappe.show_alert === 'function') {
@@ -909,6 +1285,8 @@
       window.exrp.sidecar.open = () => window.exrp.sidecar.instance.open();
       window.exrp.sidecar.close = () => window.exrp.sidecar.instance.close();
       window.exrp.sidecar.toggle = () => window.exrp.sidecar.instance.toggle();
+      window.exrp.sidecar.injectPreview = (proposal) => window.exrp.sidecar.instance.injectInPlaceFormPreview(proposal);
+      window.exrp.sidecar.clearPreview = () => window.exrp.sidecar.instance.clearInPlaceFormPreview();
     }
   }
 

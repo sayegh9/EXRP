@@ -963,3 +963,202 @@ body.dark,
     width: 100%;
   }
 }
+
+/* ==========================================================================
+   10. In-Place Visual Form Preview Adapter & Quarantine UI (ADR-001 Rev 2.3)
+   ========================================================================== */
+.exrp-form-preview-wrapper {
+  border: 2px dashed var(--primary, #2490ef);
+  background: var(--exrp-primary-light, rgba(36, 144, 239, 0.1));
+  border-radius: var(--exrp-radius-md, 10px);
+  padding: 14px 18px;
+  margin: 12px 0;
+  box-shadow: 0 4px 14px rgba(36, 144, 239, 0.12);
+  transition: var(--exrp-transition, all 0.25s cubic-bezier(0.16, 1, 0.3, 1));
+  position: relative;
+  box-sizing: border-box;
+  animation: exrp-preview-fade-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-theme="dark"] .exrp-form-preview-wrapper,
+body.dark .exrp-form-preview-wrapper,
+[data-theme-mode="dark"] .exrp-form-preview-wrapper {
+  background: rgba(36, 144, 239, 0.14);
+  border-color: #3b82f6;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.exrp-form-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+
+.exrp-preview-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: var(--exrp-radius-full, 9999px);
+  background: var(--primary, #2490ef);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: 0 0 10px var(--exrp-primary-glow, rgba(36, 144, 239, 0.35));
+  animation: exrp-preview-pulse 2s infinite ease-in-out;
+}
+
+@keyframes exrp-preview-pulse {
+  0%, 100% {
+    box-shadow: 0 0 6px rgba(36, 144, 239, 0.4);
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(36, 144, 239, 0.85);
+    opacity: 0.88;
+  }
+}
+
+@keyframes exrp-preview-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.exrp-preview-close-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--exrp-text-muted, #64748b);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: var(--exrp-radius-sm, 6px);
+  transition: var(--exrp-transition, all 0.2s ease);
+}
+
+.exrp-preview-close-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--exrp-text, #1e293b);
+  border-color: var(--exrp-border, #e2e8f0);
+}
+
+[data-theme="dark"] .exrp-preview-close-btn:hover,
+body.dark .exrp-preview-close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border-color: #374151;
+}
+
+.exrp-preview-hint {
+  font-size: 11px;
+  color: var(--exrp-text-muted, #64748b);
+  font-style: italic;
+}
+
+/* 1-Click Rollback / Quarantine Button & Status Badge */
+.exrp-btn-revert {
+  background: transparent;
+  color: var(--exrp-warning, #f59e0b);
+  border: 1px solid var(--exrp-warning, #f59e0b);
+  padding: 5px 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: var(--exrp-radius-md, 8px);
+  cursor: pointer;
+  transition: var(--exrp-transition, all 0.2s ease);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.exrp-btn-revert:hover:not(:disabled) {
+  background: var(--exrp-warning-light, #fffbeb);
+  color: #b45309;
+  border-color: #d97706;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.2);
+  transform: translateY(-1px);
+}
+
+.exrp-btn-revert:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.exrp-btn-revert.exrp-reverted {
+  background: var(--exrp-surface, #f8fafc);
+  color: var(--exrp-text-muted, #64748b);
+  border-color: var(--exrp-border, #e2e8f0);
+  cursor: default;
+  opacity: 0.8;
+  transform: none;
+  box-shadow: none;
+}
+
+[data-theme="dark"] .exrp-btn-revert:hover:not(:disabled),
+body.dark .exrp-btn-revert:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fde68a;
+  border-color: #f59e0b;
+}
+
+.exrp-btn-preview {
+  background: transparent;
+  color: var(--exrp-primary, #2490ef);
+  border-color: var(--exrp-primary, #2490ef);
+}
+
+.exrp-btn-preview:hover {
+  background: var(--exrp-primary-light, rgba(36, 144, 239, 0.1));
+  color: var(--exrp-primary-hover, #1b74c2);
+}
+
+.exrp-btn-preview.exrp-preview-active {
+  background: var(--exrp-primary, #2490ef);
+  color: #ffffff;
+}
+
+.exrp-quarantine-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: var(--exrp-warning-light, #fffbeb);
+  color: var(--exrp-warning, #b45309);
+  border: 1px solid var(--exrp-warning-border, #fde68a);
+  border-radius: var(--exrp-radius-full, 9999px);
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 6px;
+}
+
+[data-theme="dark"] .exrp-quarantine-badge,
+body.dark .exrp-quarantine-badge {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.exrp-deploy-success-details {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.exrp-deploy-success-msg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
