@@ -27,6 +27,9 @@ from .policy_enforcer import (
     policy_catalog,
 )
 
+from .property_setter_engine import execute_property_setter_deployment
+from .rollback_engine import execute_rollback
+
 __all__ = [
     "get_compact_doctype_schema",
     "validate_mutation_safety",
@@ -35,6 +38,8 @@ __all__ = [
     "DDLPlanInspection",
     "validate_ddl_plan",
     "execute_single_field_deployment",
+    "execute_property_setter_deployment",
+    "execute_rollback",
     "ExhaustiveSnapshot",
     "IdempotencyConflictError",
     "make_bounded_lock_key",

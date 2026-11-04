@@ -46,6 +46,9 @@ from exrp.ai_control_plane.policy_enforcer import (
     policy_catalog,
 )
 
+from exrp.ai_control_plane.property_setter_engine import execute_property_setter_deployment
+from exrp.ai_control_plane.rollback_engine import execute_rollback
+
 AUTHORIZED_DEPLOYMENT_ROLES: Set[str] = {
     "System Manager",
     "Finance Director",
@@ -175,6 +178,7 @@ class FrappeDeploymentAdapter:
     _shared_audit_journal: Dict[str, Dict[str, Any]] = {}
     _shared_idempotency_store: Dict[Tuple[str, str], Dict[str, Any]] = {}
     _shared_custom_fields: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    _shared_property_setters: Dict[Tuple[str, Optional[str], str], Dict[str, Any]] = {}
     _shared_table_columns: Dict[str, List[ColumnDesc]] = {}
     _shared_revision_hashes: Dict[str, str] = {}
 
@@ -185,6 +189,7 @@ class FrappeDeploymentAdapter:
         cls._shared_audit_journal.clear()
         cls._shared_idempotency_store.clear()
         cls._shared_custom_fields.clear()
+        cls._shared_property_setters.clear()
         cls._shared_table_columns.clear()
         cls._shared_revision_hashes.clear()
 
@@ -234,6 +239,7 @@ class FrappeDeploymentAdapter:
             self.audit_journal = self._shared_audit_journal
             self.idempotency_store = self._shared_idempotency_store
             self.custom_fields = self._shared_custom_fields
+            self.property_setters = self._shared_property_setters
             self.table_columns = self._shared_table_columns
             self.revision_hashes = self._shared_revision_hashes
         else:
@@ -241,6 +247,7 @@ class FrappeDeploymentAdapter:
             self.audit_journal = {}
             self.idempotency_store = {}
             self.custom_fields = {}
+            self.property_setters = {}
             self.table_columns = {}
             self.revision_hashes = {}
 
@@ -606,6 +613,155 @@ class FrappeDeploymentAdapter:
             if hasattr(self._frappe, "clear_cache"):
                 self._frappe.clear_cache(doctype=doctype)
 
+    def apply_property_setter(
+        self,
+        doctype: str,
+        fieldname: Optional[str],
+        property_name: str,
+        value: Any,
+        property_type: str = "Data",
+    ) -> None:
+        self.apply_called = True
+        if self.simulate_apply_error:
+            raise TimeoutError("(1205, 'Lock wait timeout exceeded')")
+
+        if self.in_memory:
+            self.property_setters[(doctype, fieldname, property_name)] = {
+                "name": f"ps-{doctype}-{fieldname or 'doc'}-{property_name}",
+                "doc_type": doctype,
+                "field_name": fieldname,
+                "property": property_name,
+                "value": value,
+                "property_type": property_type,
+            }
+        else:
+            if hasattr(self._frappe, "make_property_setter"):
+                try:
+                    self._frappe.make_property_setter({
+                        "doctype": doctype,
+                        "fieldname": fieldname,
+                        "property": property_name,
+                        "value": value,
+                        "property_type": property_type,
+                    })
+                except TypeError:
+                    self._frappe.make_property_setter(
+                        doctype=doctype,
+                        fieldname=fieldname,
+                        property=property_name,
+                        value=value,
+                        property_type=property_type,
+                    )
+                if hasattr(self._frappe.db, "commit"):
+                    self._frappe.db.commit()
+
+    def get_property_setter(
+        self, doctype: str, fieldname: Optional[str], property_name: str
+    ) -> Optional[Dict[str, Any]]:
+        if self.in_memory:
+            return self.property_setters.get((doctype, fieldname, property_name))
+        try:
+            if fieldname:
+                res = self._frappe.db.sql(
+                    "SELECT name, value, property_type FROM `tabProperty Setter` WHERE doc_type = %s AND field_name = %s AND property = %s",
+                    (doctype, fieldname, property_name),
+                    as_dict=True,
+                )
+            else:
+                res = self._frappe.db.sql(
+                    "SELECT name, value, property_type FROM `tabProperty Setter` WHERE doc_type = %s AND (field_name IS NULL OR field_name = '') AND property = %s",
+                    (doctype, property_name),
+                    as_dict=True,
+                )
+            if res:
+                row = res[0]
+                if isinstance(row, dict):
+                    return row
+                return {"name": row[0], "value": row[1], "property_type": row[2] if len(row) > 2 else "Data"}
+            return None
+        except Exception:
+            return None
+
+    def delete_property_setter(
+        self, doctype: str, fieldname: Optional[str], property_name: str
+    ) -> None:
+        if self.in_memory:
+            self.property_setters.pop((doctype, fieldname, property_name), None)
+        else:
+            try:
+                if fieldname:
+                    self._frappe.db.sql(
+                        "DELETE FROM `tabProperty Setter` WHERE doc_type = %s AND field_name = %s AND property = %s",
+                        (doctype, fieldname, property_name),
+                    )
+                else:
+                    self._frappe.db.sql(
+                        "DELETE FROM `tabProperty Setter` WHERE doc_type = %s AND (field_name IS NULL OR field_name = '') AND property = %s",
+                        (doctype, property_name),
+                    )
+                if hasattr(self._frappe.db, "commit"):
+                    self._frappe.db.commit()
+            except Exception:
+                pass
+
+    def get_deployment_record(self, deployment_id: str) -> Optional[Dict[str, Any]]:
+        if self.in_memory:
+            return self.audit_journal.get(deployment_id)
+        try:
+            self._ensure_audit_table()
+            res = self._frappe.db.sql(
+                f"SELECT * FROM `{self.audit_table}` WHERE deployment_id = %s",
+                (deployment_id,),
+                as_dict=True,
+            )
+            if res:
+                row = dict(res[0])
+                if row.get("outcome_json"):
+                    try:
+                        extra = json.loads(row["outcome_json"])
+                        if isinstance(extra, dict):
+                            for k, v in extra.items():
+                                if k not in row or row[k] is None:
+                                    row[k] = v
+                    except Exception:
+                        pass
+                return row
+            return None
+        except Exception:
+            return None
+
+    def update_deployment_status(
+        self, deployment_id: str, status: str, outcome: Optional[Dict[str, Any]] = None
+    ) -> None:
+        outcome_record = {"outcome": outcome or {"status": status}}
+        self.persist_final_outcome_and_audit(deployment_id, outcome_record)
+
+    def get_effective_field_property(
+        self, doctype: str, fieldname: str, property_name: str
+    ) -> Any:
+        ps = self.get_property_setter(doctype, fieldname, property_name)
+        if ps is not None:
+            return ps.get("value")
+        if self.in_memory:
+            if (doctype, fieldname) in self.custom_fields:
+                return self.custom_fields[(doctype, fieldname)].get(property_name)
+            if property_name in ("hidden", "reqd", "read_only", "in_list_view", "in_standard_filter", "bold"):
+                return 0
+            if property_name == "label":
+                return fieldname.replace("_", " ").title()
+            return None
+        else:
+            if hasattr(self._frappe, "get_meta"):
+                try:
+                    meta = self._frappe.get_meta(doctype)
+                    df = meta.get_field(fieldname) if hasattr(meta, "get_field") else None
+                    if df:
+                        return getattr(df, property_name, None)
+                except Exception:
+                    pass
+            return None
+
+
 
 def apply_configuration_change(
     doctype: str,
@@ -803,6 +959,148 @@ def apply_configuration_change(
 
 if frappe and hasattr(frappe, "whitelist"):
     apply_configuration_change = frappe.whitelist()(apply_configuration_change)
+
+
+def apply_property_setter_change(
+    doctype: str,
+    deployment_id: Optional[str] = None,
+    fieldname: Optional[str] = None,
+    property_name: Optional[str] = None,
+    value: Any = None,
+    property_type: str = "Data",
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    Whitelisted RPC endpoint for Property Setter metadata mutation.
+    Adheres strictly to ADR-001 Rev 2.3 (§5, §8, §9.1):
+    1. Checks authenticated user roles: only authorized roles (System Manager,
+       Finance Director, Operations Director) can apply changes.
+    2. Invokes execute_property_setter_deployment with durable MariaDB advisory lock,
+       audit prepare durability, Property Setter creation, cache clear, and metadata reflection.
+    3. Returns structured outcome (status, disposition, execution_time_ms).
+    """
+    start_time = time.perf_counter()
+
+    if not deployment_id:
+        deployment_id = kwargs.get("deployment_id") or f"dep_ps_{uuid.uuid4().hex[:12]}"
+
+    if not property_name and "property" in kwargs:
+        property_name = kwargs.get("property")
+
+    user_roles = kwargs.get("user_roles")
+    if user_roles is None:
+        user_roles = get_current_user_roles()
+
+    user_role_set = set(user_roles)
+    if not user_role_set.intersection(AUTHORIZED_DEPLOYMENT_ROLES):
+        execution_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        if kwargs.get("raise_on_unauthorized"):
+            if frappe and hasattr(frappe, "PermissionError"):
+                raise frappe.PermissionError(
+                    f"Unauthorized: User roles {sorted(user_role_set)} lack required deployment authority {sorted(AUTHORIZED_DEPLOYMENT_ROLES)}."
+                )
+            raise PermissionError(
+                f"Unauthorized: User roles {sorted(user_role_set)} lack required deployment authority {sorted(AUTHORIZED_DEPLOYMENT_ROLES)}."
+            )
+        return {
+            "deployment_id": deployment_id,
+            "status": "REJECTED",
+            "success": False,
+            "stage": "AUTHORIZATION",
+            "disposition": "UNAUTHORIZED_ROLE",
+            "reason": (
+                f"User does not possess any authorized deployment role. "
+                f"Required one of: {sorted(AUTHORIZED_DEPLOYMENT_ROLES)}. Found: {sorted(user_role_set)}"
+            ),
+            "execution_time_ms": execution_time_ms,
+        }
+
+    db = kwargs.get("adapter") or kwargs.get("db")
+    if db is None:
+        db = FrappeDeploymentAdapter()
+
+    site_id = (
+        getattr(getattr(frappe, "local", None), "site", None)
+        or kwargs.get("site")
+        or kwargs.get("site_id")
+        or "default"
+    )
+
+    forward_kwargs = dict(kwargs)
+    forward_kwargs.pop("user_roles", None)
+    forward_kwargs.pop("adapter", None)
+    forward_kwargs.pop("db", None)
+    forward_kwargs.pop("site", None)
+    forward_kwargs.pop("site_id", None)
+
+    try:
+        outcome = execute_property_setter_deployment(
+            db=db,
+            deployment_id=deployment_id,
+            site_id=site_id,
+            doctype=doctype,
+            fieldname=fieldname,
+            property_name=property_name,
+            value=value,
+            property_type=property_type,
+            user_roles=user_roles,
+            **forward_kwargs,
+        )
+    except Exception as exc:
+        execution_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        return {
+            "deployment_id": deployment_id,
+            "status": "FAILED_CLEAN",
+            "success": False,
+            "stage": "UNKNOWN",
+            "disposition": "UNEXPECTED_ERROR",
+            "reason": f"Property Setter execution raised unhandled exception: {exc}",
+            "execution_time_ms": execution_time_ms,
+        }
+
+    return outcome
+
+
+def revert_configuration_change(
+    deployment_id: str,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    Whitelisted RPC endpoint for 1-click rollback and soft quarantine.
+    Adheres strictly to ADR-001 Rev 2.3 (§8, §9.1):
+    - Strictly checks authorization: only System Manager, Finance Director, Operations Director.
+    - If Property Setter: restores baseline property value captured before mutation,
+      or removes Property Setter if no baseline existed. Marks ROLLED_BACK.
+    - If Custom Field: soft-quarantines by setting hidden=1 and reqd=0 without dropping column.
+      Marks QUARANTINED.
+    """
+    user_roles = kwargs.get("caller_roles") or kwargs.get("user_roles")
+    if user_roles is None:
+        user_roles = get_current_user_roles()
+
+    db = kwargs.get("adapter") or kwargs.get("db")
+    if db is None:
+        db = FrappeDeploymentAdapter()
+
+    forward_kwargs = dict(kwargs)
+    forward_kwargs.pop("caller_roles", None)
+    forward_kwargs.pop("user_roles", None)
+    forward_kwargs.pop("adapter", None)
+    forward_kwargs.pop("db", None)
+
+    return execute_rollback(
+        deployment_id=deployment_id,
+        caller_roles=user_roles,
+        db=db,
+        **forward_kwargs,
+    )
+
+
+
+if frappe and hasattr(frappe, "whitelist"):
+    apply_property_setter_change = frappe.whitelist()(apply_property_setter_change)
+    revert_configuration_change = frappe.whitelist()(revert_configuration_change)
+
 
 
 def enforce_runtime_policies_on_validate(doc, method=None, user_roles: Optional[List[str]] = None) -> PolicyEvaluationResult:
