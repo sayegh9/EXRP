@@ -1,0 +1,61 @@
+name: EXRP CI
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+      - 'feat/**'
+  pull_request:
+    branches:
+      - develop
+      - main
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MYSQL_ROOT_PASSWORD: admin
+          MYSQL_DATABASE: exrp_poc_db
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -padmin"
+          --health-interval 5s
+          --health-timeout 2s
+          --health-retries 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pymysql google-genai pydantic
+
+      - name: Run Unit & Guardrail Tests
+        run: |
+          PYTHONPATH=. python exrp/tests/test_ai_control_plane.py
+          PYTHONPATH=. python exrp/tests/test_planner.py
+          PYTHONPATH=. python exrp/tests/test_api_deployment.py
+          PYTHONPATH=. python exrp/tests/test_policy_enforcer.py
+
+      - name: Run Live MariaDB Contention PoC Tests
+        run: |
+          PYTHONPATH=. python exrp/tests/test_live_mariadb_suite_b.py
