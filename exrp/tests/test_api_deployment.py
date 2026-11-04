@@ -34,6 +34,15 @@ if "frappe" not in sys.modules:
         sys.modules["frappe"] = f
         sys.modules["frappe.utils"] = f.utils
 
+try:
+    import frappe
+    if hasattr(frappe, "local"):
+        if not hasattr(frappe.local, "flags"):
+            frappe.local.flags = frappe._dict() if hasattr(frappe, "_dict") else types.SimpleNamespace()
+        frappe.local.flags.in_test = True
+except Exception:
+    pass
+
 from exrp.ai_control_plane.ddl_plan_gate import ColumnDesc, DDLPlanInspection
 from exrp.ai_control_plane.schema_reconciler import (
     ExhaustiveSnapshot,

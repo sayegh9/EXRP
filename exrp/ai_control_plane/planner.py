@@ -11,6 +11,11 @@ import json
 from typing import Dict, Any, List, Optional, Literal, Union, Callable
 from pydantic import BaseModel, Field, ConfigDict, ValidationError, field_validator
 
+try:
+    import frappe
+except ImportError:
+    frappe = None
+
 from exrp.ai_control_plane.schema_extractor import get_compact_doctype_schema
 from exrp.ai_control_plane.safety_guardrails import (
     validate_mutation_safety,
@@ -101,6 +106,137 @@ class PlannerResult(BaseModel):
     feedback_history: List[str] = Field(default_factory=list)
 
 
+def resolve_llm_config() -> Dict[str, Any]:
+    """
+    Resolves runtime LLM configuration adhering to ADR-001 Rev 2.3:
+    1. Reads from Frappe Single DocType 'EXRP Settings' if Frappe runtime is available.
+    2. Uses settings.get_password("api_key") or settings.api_key if set.
+    3. Falls back to os.environ.get("GEMINI_API_KEY") or os.environ.get("OPENAI_API_KEY").
+    4. Checks settings.offline_mode or settings.llm_provider == 'Mock / Offline Test Mode'.
+    """
+    settings_dict: Dict[str, Any] = {}
+    api_key: Optional[str] = None
+    settings_doc = None
+
+    if frappe:
+        try:
+            if hasattr(frappe, "get_single"):
+                settings_doc = frappe.get_single("EXRP Settings")
+            elif hasattr(frappe, "db") and hasattr(frappe.db, "get_singles_dict"):
+                settings_dict = frappe.db.get_singles_dict("EXRP Settings") or {}
+        except Exception:
+            settings_doc = None
+            settings_dict = {}
+
+    if settings_doc is not None:
+        if hasattr(settings_doc, "as_dict") and callable(settings_doc.as_dict):
+            try:
+                settings_dict = settings_doc.as_dict()
+            except Exception:
+                settings_dict = {}
+        elif isinstance(settings_doc, dict):
+            settings_dict = settings_doc
+        elif hasattr(settings_doc, "__dict__"):
+            settings_dict = dict(settings_doc.__dict__)
+
+        # Resolve api_key via get_password if available
+        if hasattr(settings_doc, "get_password") and callable(settings_doc.get_password):
+            try:
+                api_key = settings_doc.get_password("api_key", raise_exception=False)
+            except Exception:
+                api_key = None
+        if not api_key:
+            api_key = getattr(settings_doc, "api_key", None)
+
+    if not api_key:
+        api_key = settings_dict.get("api_key")
+
+    # Fallback to environment variables
+    if not api_key:
+        api_key = (
+            os.environ.get("GEMINI_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("ANTHROPIC_API_KEY")
+        )
+
+    # Provider
+    llm_provider = settings_dict.get("llm_provider") or getattr(settings_doc, "llm_provider", None)
+    if not llm_provider:
+        if os.environ.get("GEMINI_API_KEY"):
+            llm_provider = "Google Gemini"
+        elif os.environ.get("OPENAI_API_KEY"):
+            llm_provider = "OpenAI"
+        elif os.environ.get("ANTHROPIC_API_KEY"):
+            llm_provider = "Anthropic"
+        else:
+            llm_provider = "Google Gemini"
+
+    # Model name
+    model_name = (
+        settings_dict.get("model_name")
+        or getattr(settings_doc, "model_name", None)
+        or os.environ.get("EXRP_MODEL_NAME")
+        or "gemini-3.8-flash"
+    )
+
+    # Custom base URL
+    api_base_url = (
+        settings_dict.get("api_base_url")
+        or getattr(settings_doc, "api_base_url", None)
+        or os.environ.get("LLM_BASE_URL")
+    )
+
+    # Numeric & boolean options
+    raw_temp = settings_dict.get("temperature") if "temperature" in settings_dict else getattr(settings_doc, "temperature", 0.2)
+    try:
+        temperature = float(raw_temp if raw_temp is not None else 0.2)
+    except (ValueError, TypeError):
+        temperature = 0.2
+
+    raw_retries = settings_dict.get("max_retries") if "max_retries" in settings_dict else getattr(settings_doc, "max_retries", 2)
+    try:
+        max_retries = int(raw_retries if raw_retries is not None else 2)
+    except (ValueError, TypeError):
+        max_retries = 2
+
+    raw_sidecar = settings_dict.get("enable_sidecar") if "enable_sidecar" in settings_dict else getattr(settings_doc, "enable_sidecar", 1)
+    enable_sidecar = bool(int(raw_sidecar if raw_sidecar is not None else 1))
+
+    raw_offline = settings_dict.get("offline_mode") if "offline_mode" in settings_dict else getattr(settings_doc, "offline_mode", 0)
+    offline_mode = bool(int(raw_offline if raw_offline is not None else 0))
+
+    raw_lock = settings_dict.get("strict_tier0_lock") if "strict_tier0_lock" in settings_dict else getattr(settings_doc, "strict_tier0_lock", 1)
+    strict_tier0_lock = bool(int(raw_lock if raw_lock is not None else 1))
+
+    raw_timeout = settings_dict.get("lock_wait_timeout") if "lock_wait_timeout" in settings_dict else getattr(settings_doc, "lock_wait_timeout", 3)
+    try:
+        lock_wait_timeout = int(raw_timeout if raw_timeout is not None else 3)
+    except (ValueError, TypeError):
+        lock_wait_timeout = 3
+
+    # Mock mode determination:
+    # Checks settings.offline_mode or settings.llm_provider == 'Mock / Offline Test Mode'
+    mock_mode = (
+        offline_mode
+        or (llm_provider == "Mock / Offline Test Mode")
+        or (not api_key and llm_provider != "Mock / Offline Test Mode")
+    )
+
+    return {
+        "llm_provider": llm_provider,
+        "model_name": model_name,
+        "api_key": api_key,
+        "api_base_url": api_base_url,
+        "temperature": temperature,
+        "max_retries": max_retries,
+        "enable_sidecar": enable_sidecar,
+        "offline_mode": offline_mode,
+        "strict_tier0_lock": strict_tier0_lock,
+        "lock_wait_timeout": lock_wait_timeout,
+        "mock_mode": mock_mode,
+    }
+
+
 class AIConfigurationPlanner:
     """
     Conversational Configuration Planner for Frappe/ERPNext.
@@ -114,14 +250,23 @@ class AIConfigurationPlanner:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "gemini-3.8-flash",
+        model: Optional[str] = None,
         client: Any = None,
         mock_mode: Optional[bool] = None,
         truncate_to_single_field: bool = False,
         ddl_inspector: Optional[Callable] = None,
+        temperature: Optional[float] = None,
+        max_retries: Optional[int] = None,
     ):
-        self.model = model
-        self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
+        config = resolve_llm_config()
+
+        self.model = model or config.get("model_name") or "gemini-3.8-flash"
+        self.api_key = api_key or config.get("api_key")
+        self.temperature = temperature if temperature is not None else config.get("temperature", 0.2)
+        self.max_retries = max_retries if max_retries is not None else config.get("max_retries", 2)
+        self.provider = config.get("llm_provider", "Google Gemini")
+        self.api_base_url = config.get("api_base_url")
+        self.offline_mode = config.get("offline_mode", False)
         self.client = client
         self.truncate_to_single_field = truncate_to_single_field
         self.ddl_inspector = ddl_inspector
@@ -129,26 +274,27 @@ class AIConfigurationPlanner:
         # Determine mock mode: offline/CI default unless client or API key supplied
         if mock_mode is not None:
             self.mock_mode = mock_mode
-        else:
-            if self.client is not None:
+        elif self.offline_mode or self.provider == "Mock / Offline Test Mode":
+            self.mock_mode = True
+        elif self.client is not None:
+            self.mock_mode = False
+        elif self.api_key:
+            try:
+                from google import genai
+                self.client = genai.Client(api_key=self.api_key)
                 self.mock_mode = False
-            elif self.api_key:
-                try:
-                    from google import genai
-                    self.client = genai.Client(api_key=self.api_key)
-                    self.mock_mode = False
-                except Exception:
-                    self.client = None
-                    self.mock_mode = True
-            else:
+            except Exception:
+                self.client = None
                 self.mock_mode = True
+        else:
+            self.mock_mode = True
 
     def plan_change(
         self,
         doctype: str,
         user_prompt: str,
         user_roles: Optional[List[str]] = None,
-        max_retries: int = 2,
+        max_retries: Optional[int] = None,
     ) -> PlannerResult:
         """
         Plans, validates, and gates a configuration change based on natural language input.
@@ -157,6 +303,7 @@ class AIConfigurationPlanner:
         """
         user_roles = user_roles or ["System Manager"]
         compact_schema = get_compact_doctype_schema(doctype)
+        effective_max_retries = max_retries if max_retries is not None else getattr(self, "max_retries", 2)
 
         feedback_history: List[str] = []
         attempts = 0
@@ -165,7 +312,7 @@ class AIConfigurationPlanner:
         last_ddl_plan: Optional[Dict[str, Any]] = None
         last_error: Optional[str] = None
 
-        while attempts <= max_retries:
+        while attempts <= effective_max_retries:
             attempts += 1
 
             # 1. Generate Proposal
@@ -193,7 +340,7 @@ class AIConfigurationPlanner:
                     "Correct the proposal to satisfy enterprise safety invariants."
                 )
                 feedback_history.append(feedback)
-                if attempts > max_retries:
+                if attempts > effective_max_retries:
                     return PlannerResult(
                         success=False,
                         proposal=last_proposal,
@@ -209,7 +356,7 @@ class AIConfigurationPlanner:
 
             # 2. Phase 1 Single-Field Unit Enforcement (§5.1)
             if proposal.intent == "add_custom_fields" and len(proposal.changes) > 1:
-                if self.truncate_to_single_field or attempts > max_retries:
+                if self.truncate_to_single_field or attempts > effective_max_retries:
                     proposal.changes = proposal.changes[:1]
                     proposal.summary += " (Phase 1 constraint: truncated to single field deployment unit)"
 
@@ -229,7 +376,7 @@ class AIConfigurationPlanner:
                     "Correct the proposal to satisfy enterprise safety invariants."
                 )
                 feedback_history.append(feedback)
-                if attempts > max_retries:
+                if attempts > effective_max_retries:
                     return PlannerResult(
                         success=False,
                         proposal=proposal,
@@ -248,7 +395,7 @@ class AIConfigurationPlanner:
                     "Correct the proposal to satisfy enterprise safety invariants."
                 )
                 feedback_history.append(feedback)
-                if attempts > max_retries:
+                if attempts > effective_max_retries:
                     return PlannerResult(
                         success=False,
                         proposal=proposal,
@@ -271,7 +418,7 @@ class AIConfigurationPlanner:
                         "Correct the proposal to satisfy enterprise safety invariants."
                     )
                     feedback_history.append(feedback)
-                    if attempts > max_retries:
+                    if attempts > effective_max_retries:
                         return PlannerResult(
                             success=False,
                             proposal=proposal,
@@ -305,7 +452,7 @@ class AIConfigurationPlanner:
                         "Correct the proposal to satisfy enterprise safety invariants."
                     )
                     feedback_history.append(feedback)
-                    if attempts > max_retries:
+                    if attempts > effective_max_retries:
                         return PlannerResult(
                             success=False,
                             proposal=proposal,

@@ -134,6 +134,7 @@
             </div>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="exrp-btn-settings" id="exrp-btn-settings" title="Configure LLM Provider & Settings (EXRP Settings)" style="background: none; border: 1px solid var(--border-color); cursor: pointer; font-size: 14px; padding: 3px 6px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-color); line-height: 1;">⚙️</button>
             <span class="exrp-doctype-badge" id="exrp-header-doctype-badge">Desk</span>
             <button class="exrp-btn-close" id="exrp-btn-close" title="Close Sidecar (Esc)">✕</button>
           </div>
@@ -222,8 +223,20 @@
       // Send Button
       this.sendBtnEl.addEventListener('click', () => this.handleSend());
 
+      // Settings button
+      const settingsBtn = this.drawerEl.querySelector('#exrp-btn-settings');
+      if (settingsBtn) {
+        settingsBtn.addEventListener('click', () => this.openSettings());
+      }
+
       // Quick prompt delegation
       this.chatStreamEl.addEventListener('click', (e) => {
+        if (e.target.closest('#exrp-link-open-settings')) {
+          e.preventDefault();
+          this.openSettings();
+          return;
+        }
+
         const chip = e.target.closest('.exrp-chip-btn');
         if (chip && chip.dataset.prompt) {
           this.inputEl.value = chip.dataset.prompt;
@@ -240,6 +253,17 @@
           });
         }
       });
+    }
+
+    /**
+     * Navigates to EXRP Settings Form
+     */
+    openSettings() {
+      if (window.frappe && typeof window.frappe.set_route === 'function') {
+        window.frappe.set_route('Form', 'EXRP Settings');
+      } else {
+        window.location.href = '/app/exrp-settings';
+      }
     }
 
     /**
@@ -364,6 +388,10 @@
                 <button type="button" class="exrp-chip-btn" data-prompt="Add a priority status dropdown with Low, Medium, High">⚡ Priority Dropdown</button>
                 <button type="button" class="exrp-chip-btn" data-prompt="Add a cargo tracking number data field">📦 Tracking Number</button>
                 <button type="button" class="exrp-chip-btn" data-prompt="Add an inspection notes text field">📝 Inspection Notes</button>
+              </div>
+              <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border-color); font-size: 11px; color: var(--text-muted); display: flex; align-items: center; justify-content: space-between;">
+                <span>⚙️ Need to configure Gemini API Key or LLM Provider?</span>
+                <a href="#" id="exrp-link-open-settings" style="color: var(--primary); font-weight: 500; text-decoration: underline;">Open Settings</a>
               </div>
             </div>
           </div>

@@ -36,7 +36,7 @@ from exrp.ai_control_plane.schema_reconciler import (
     execute_single_field_deployment,
     make_bounded_lock_key,
 )
-from exrp.ai_control_plane.planner import AIConfigurationPlanner
+from exrp.ai_control_plane.planner import AIConfigurationPlanner, resolve_llm_config
 from exrp.ai_control_plane.policy_enforcer import (
     PolicyType,
     RuntimePolicy,
@@ -55,8 +55,11 @@ AUTHORIZED_DEPLOYMENT_ROLES: Set[str] = {
 
 def get_current_user_roles() -> list:
     """Returns the authenticated Frappe user's assigned roles."""
-    if frappe and hasattr(frappe, "get_roles") and hasattr(frappe, "session") and hasattr(frappe.session, "user"):
-        return frappe.get_roles(frappe.session.user)
+    try:
+        if frappe and hasattr(frappe, "get_roles") and hasattr(frappe, "session") and hasattr(frappe.session, "user"):
+            return frappe.get_roles(frappe.session.user)
+    except Exception:
+        pass
     return ["System Manager"]
 
 
@@ -247,10 +250,13 @@ class FrappeDeploymentAdapter:
     def _is_frappe_db_available(self) -> bool:
         if self._frappe is None:
             return False
-        db = getattr(self._frappe, "db", None)
-        if db is None or not hasattr(db, "sql") or not callable(db.sql):
+        try:
+            db = getattr(self._frappe, "db", None)
+            if db is None or not hasattr(db, "sql") or not callable(db.sql):
+                return False
+            return True
+        except Exception:
             return False
-        return True
 
     def _ensure_audit_table(self) -> None:
         if self.in_memory:
@@ -911,8 +917,125 @@ def evaluate_document_policies(
     return res.to_dict()
 
 
+def test_llm_connection(
+    provider: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model_name: Optional[str] = None,
+    api_base_url: Optional[str] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    Whitelisted RPC endpoint: Tests connectivity to the selected LLM provider.
+    Returns {"success": True, "message": "Connection verified successfully!"} or error details.
+    """
+    config = resolve_llm_config()
+
+    eff_provider = provider or config.get("llm_provider") or "Google Gemini"
+    eff_api_key = api_key or config.get("api_key")
+    eff_model = model_name or config.get("model_name") or "gemini-3.8-flash"
+    eff_base_url = api_base_url or config.get("api_base_url")
+
+    # If offline_mode is set in EXRP Settings and no provider was explicitly passed,
+    # or provider is explicitly Mock
+    if eff_provider == "Mock / Offline Test Mode" or (config.get("offline_mode") and not provider):
+        return {
+            "success": True,
+            "message": "Connection verified successfully!",
+        }
+
+    if not eff_api_key:
+        return {
+            "success": False,
+            "message": f"API key is missing for provider '{eff_provider}'.",
+            "error": "Missing API Key",
+        }
+
+    try:
+        if eff_provider == "Google Gemini":
+            from google import genai
+            client = genai.Client(api_key=eff_api_key)
+            client.models.get(model=eff_model)
+            return {
+                "success": True,
+                "message": "Connection verified successfully!",
+            }
+
+        elif eff_provider in ("OpenAI", "Custom OpenAI-Compatible"):
+            import requests
+            base_url = (eff_base_url or "https://api.openai.com/v1").rstrip("/")
+            url = f"{base_url}/models"
+            headers = {"Authorization": f"Bearer {eff_api_key}"}
+            resp = requests.get(url, headers=headers, timeout=5)
+            if resp.status_code == 200:
+                return {
+                    "success": True,
+                    "message": "Connection verified successfully!",
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": f"{eff_provider} HTTP {resp.status_code}: {resp.text}",
+                    "status_code": resp.status_code,
+                }
+
+        elif eff_provider == "Anthropic":
+            import requests
+            base_url = (eff_base_url or "https://api.anthropic.com/v1").rstrip("/")
+            url = f"{base_url}/models"
+            headers = {
+                "x-api-key": eff_api_key,
+                "anthropic-version": "2023-06-01",
+            }
+            resp = requests.get(url, headers=headers, timeout=5)
+            if resp.status_code == 200:
+                return {
+                    "success": True,
+                    "message": "Connection verified successfully!",
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": f"Anthropic HTTP {resp.status_code}: {resp.text}",
+                    "status_code": resp.status_code,
+                }
+
+        else:
+            return {
+                "success": False,
+                "message": f"Unsupported LLM provider: {eff_provider}",
+            }
+
+    except Exception as exc:
+        return {
+            "success": False,
+            "message": f"Connection failed: {str(exc)}",
+            "error": str(exc),
+        }
+
+
+def get_llm_config() -> Dict[str, Any]:
+    """
+    Whitelisted RPC endpoint: returns non-sensitive LLM configuration
+    (provider, model_name, has_api_key: bool).
+    """
+    config = resolve_llm_config()
+    return {
+        "provider": config.get("llm_provider"),
+        "model_name": config.get("model_name"),
+        "has_api_key": bool(config.get("api_key")),
+        "api_base_url": config.get("api_base_url"),
+        "offline_mode": bool(config.get("offline_mode")),
+        "temperature": config.get("temperature", 0.2),
+        "max_retries": config.get("max_retries", 2),
+        "enable_sidecar": bool(config.get("enable_sidecar", True)),
+    }
+
+
 if frappe and hasattr(frappe, "whitelist"):
     get_runtime_policies = frappe.whitelist()(get_runtime_policies)
     register_runtime_policy = frappe.whitelist()(register_runtime_policy)
     evaluate_document_policies = frappe.whitelist()(evaluate_document_policies)
+    test_llm_connection = frappe.whitelist()(test_llm_connection)
+    get_llm_config = frappe.whitelist()(get_llm_config)
+
 

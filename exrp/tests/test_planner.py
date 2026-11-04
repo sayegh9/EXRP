@@ -30,16 +30,30 @@ if "frappe" not in sys.modules:
         sys.modules["frappe"] = f
         sys.modules["frappe.utils"] = f.utils
 
+try:
+    import frappe
+    if hasattr(frappe, "local"):
+        if not hasattr(frappe.local, "flags"):
+            frappe.local.flags = frappe._dict() if hasattr(frappe, "_dict") else types.SimpleNamespace()
+        frappe.local.flags.in_test = True
+except Exception:
+    pass
+
+from unittest.mock import patch, MagicMock
+
 from exrp.ai_control_plane.planner import (
     ProposedFieldChange,
     ConfigurationProposal,
     PlannerResult,
     AIConfigurationPlanner,
+    resolve_llm_config,
 )
 from exrp.ai_control_plane.ddl_plan_gate import DDLPlanInspection
 from exrp.api.control_plane import (
     propose_configuration_change,
     apply_configuration_change,
+    test_llm_connection,
+    get_llm_config,
 )
 
 
@@ -344,6 +358,193 @@ class TestAIConfigurationPlanner(unittest.TestCase):
         )
         self.assertFalse(rejected_res["success"])
         self.assertEqual(rejected_res["status"], "REJECTED")
+
+    def test_9_resolve_llm_config_with_settings_doc(self):
+        """
+        Test 9: Verifies resolve_llm_config reads from EXRP Settings Single DocType,
+        extracts get_password('api_key'), and correctly maps offline_mode & provider.
+        """
+        mock_doc = types.SimpleNamespace(
+            llm_provider="Google Gemini",
+            model_name="gemini-3.8-flash",
+            api_key="secret-from-doctype",
+            api_base_url="https://proxy.example.com",
+            temperature=0.7,
+            max_retries=3,
+            enable_sidecar=1,
+            offline_mode=0,
+            strict_tier0_lock=1,
+            lock_wait_timeout=5,
+            get_password=lambda field, raise_exception=False: "decrypted-secret-key" if field == "api_key" else None,
+            as_dict=lambda: {
+                "llm_provider": "Google Gemini",
+                "model_name": "gemini-3.8-flash",
+                "temperature": 0.7,
+                "max_retries": 3,
+                "enable_sidecar": 1,
+                "offline_mode": 0,
+                "strict_tier0_lock": 1,
+                "lock_wait_timeout": 5,
+            },
+        )
+
+        with patch("exrp.ai_control_plane.planner.frappe") as mock_frappe:
+            mock_frappe.get_single.return_value = mock_doc
+            config = resolve_llm_config()
+
+            self.assertEqual(config["llm_provider"], "Google Gemini")
+            self.assertEqual(config["model_name"], "gemini-3.8-flash")
+            self.assertEqual(config["api_key"], "decrypted-secret-key")
+            self.assertEqual(config["api_base_url"], "https://proxy.example.com")
+            self.assertEqual(config["temperature"], 0.7)
+            self.assertEqual(config["max_retries"], 3)
+            self.assertTrue(config["enable_sidecar"])
+            self.assertFalse(config["offline_mode"])
+            self.assertTrue(config["strict_tier0_lock"])
+            self.assertEqual(config["lock_wait_timeout"], 5)
+            self.assertFalse(config["mock_mode"])
+
+    def test_10_resolve_llm_config_offline_and_mock_mode(self):
+        """
+        Test 10: Verifies offline_mode and 'Mock / Offline Test Mode' enforce mock_mode=True.
+        """
+        # Case A: offline_mode = 1
+        mock_doc_offline = types.SimpleNamespace(
+            llm_provider="Google Gemini",
+            offline_mode=1,
+            api_key="valid-key",
+            get_password=lambda field, raise_exception=False: "valid-key",
+            as_dict=lambda: {"offline_mode": 1, "llm_provider": "Google Gemini"},
+        )
+        with patch("exrp.ai_control_plane.planner.frappe") as mock_frappe:
+            mock_frappe.get_single.return_value = mock_doc_offline
+            config = resolve_llm_config()
+            self.assertTrue(config["offline_mode"])
+            self.assertTrue(config["mock_mode"])
+
+        # Case B: llm_provider = 'Mock / Offline Test Mode'
+        mock_doc_mock = types.SimpleNamespace(
+            llm_provider="Mock / Offline Test Mode",
+            offline_mode=0,
+            api_key="",
+            get_password=lambda field, raise_exception=False: None,
+            as_dict=lambda: {"offline_mode": 0, "llm_provider": "Mock / Offline Test Mode"},
+        )
+        with patch("exrp.ai_control_plane.planner.frappe") as mock_frappe:
+            mock_frappe.get_single.return_value = mock_doc_mock
+            config = resolve_llm_config()
+            self.assertEqual(config["llm_provider"], "Mock / Offline Test Mode")
+            self.assertTrue(config["mock_mode"])
+
+    def test_11_resolve_llm_config_env_fallbacks(self):
+        """
+        Test 11: Verifies environment variable fallbacks (GEMINI_API_KEY, OPENAI_API_KEY)
+        when EXRP Settings is absent or unconfigured.
+        """
+        with patch("exrp.ai_control_plane.planner.frappe", None):
+            # Test GEMINI_API_KEY fallback
+            with patch.dict(os.environ, {"GEMINI_API_KEY": "env-gemini-key", "OPENAI_API_KEY": ""}):
+                config = resolve_llm_config()
+                self.assertEqual(config["llm_provider"], "Google Gemini")
+                self.assertEqual(config["api_key"], "env-gemini-key")
+                self.assertFalse(config["mock_mode"])
+
+            # Test OPENAI_API_KEY fallback
+            clean_env = {k: v for k, v in os.environ.items() if k not in ("GEMINI_API_KEY", "OPENAI_API_KEY")}
+            clean_env["OPENAI_API_KEY"] = "env-openai-key"
+            with patch.dict(os.environ, clean_env, clear=True):
+                config = resolve_llm_config()
+                self.assertEqual(config["llm_provider"], "OpenAI")
+                self.assertEqual(config["api_key"], "env-openai-key")
+                self.assertFalse(config["mock_mode"])
+
+            # Test no keys -> mock_mode=True
+            with patch.dict(os.environ, {}, clear=True):
+                config = resolve_llm_config()
+                self.assertIsNone(config["api_key"])
+                self.assertTrue(config["mock_mode"])
+
+    def test_12_test_llm_connection_and_get_config(self):
+        """
+        Test 12: Verifies test_llm_connection RPC endpoint and get_llm_config.
+        """
+        # Test 12.1: Mock provider succeeds immediately
+        res = test_llm_connection(provider="Mock / Offline Test Mode")
+        self.assertTrue(res["success"])
+        self.assertIn("verified successfully", res["message"])
+
+        # Test 12.2: Missing API key fails cleanly
+        res = test_llm_connection(provider="Google Gemini", api_key="")
+        self.assertFalse(res["success"])
+        self.assertIn("missing", res["message"].lower())
+
+        # Test 12.3: Google Gemini with mocked genai client success
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+            res = test_llm_connection(provider="Google Gemini", api_key="test-key", model_name="gemini-3.8-flash")
+            self.assertTrue(res["success"])
+            self.assertEqual(res["message"], "Connection verified successfully!")
+            mock_client.models.get.assert_called_with(model="gemini-3.8-flash")
+
+        # Test 12.4: Google Gemini with client error returns failure details
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.models.get.side_effect = RuntimeError("API quota exceeded")
+            mock_client_cls.return_value = mock_client
+            res = test_llm_connection(provider="Google Gemini", api_key="test-key")
+            self.assertFalse(res["success"])
+            self.assertIn("quota exceeded", res["message"])
+
+        # Test 12.5: OpenAI connection via mocked requests
+        with patch("requests.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_get.return_value = mock_resp
+            res = test_llm_connection(provider="OpenAI", api_key="sk-test-key")
+            self.assertTrue(res["success"])
+
+        # Test 12.6: get_llm_config returns non-sensitive config
+        with patch("exrp.api.control_plane.resolve_llm_config") as mock_resolve:
+            mock_resolve.return_value = {
+                "llm_provider": "Google Gemini",
+                "model_name": "gemini-3.8-flash",
+                "api_key": "secret-super-key",
+                "api_base_url": None,
+                "offline_mode": False,
+                "temperature": 0.2,
+                "max_retries": 2,
+                "enable_sidecar": True,
+            }
+            cfg = get_llm_config()
+            self.assertEqual(cfg["provider"], "Google Gemini")
+            self.assertEqual(cfg["model_name"], "gemini-3.8-flash")
+            self.assertTrue(cfg["has_api_key"])
+            self.assertNotIn("secret-super-key", json.dumps(cfg))
+
+    def test_13_planner_defaults_from_settings(self):
+        """
+        Test 13: Verifies AIConfigurationPlanner adopts resolved defaults
+        when parameters are not explicitly passed.
+        """
+        with patch("exrp.ai_control_plane.planner.resolve_llm_config") as mock_resolve:
+            mock_resolve.return_value = {
+                "llm_provider": "Google Gemini",
+                "model_name": "gemini-custom-model",
+                "api_key": "custom-key",
+                "api_base_url": None,
+                "offline_mode": False,
+                "temperature": 0.5,
+                "max_retries": 4,
+                "enable_sidecar": True,
+                "mock_mode": False,
+            }
+            with patch("google.genai.Client"):
+                planner = AIConfigurationPlanner()
+                self.assertEqual(planner.model, "gemini-custom-model")
+                self.assertEqual(planner.api_key, "custom-key")
+                self.assertEqual(planner.temperature, 0.5)
+                self.assertEqual(planner.max_retries, 4)
 
 
 if __name__ == "__main__":
