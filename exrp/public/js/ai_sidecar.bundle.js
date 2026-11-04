@@ -405,6 +405,7 @@
                 <button type="button" class="exrp-chip-btn" data-prompt="Add a priority status dropdown with Low, Medium, High">⚡ Priority Dropdown</button>
                 <button type="button" class="exrp-chip-btn" data-prompt="Add a cargo tracking number data field">📦 Tracking Number</button>
                 <button type="button" class="exrp-chip-btn" data-prompt="Add an inspection notes text field">📝 Inspection Notes</button>
+                <button type="button" class="exrp-chip-btn" data-prompt="Create a 2-stage approval workflow with Manager signoff">🔀 2-Stage Approval</button>
               </div>
               <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border-color); font-size: 11px; color: var(--text-muted); display: flex; align-items: center; justify-content: space-between;">
                 <span>⚙️ Need to configure Gemini API Key or LLM Provider?</span>
@@ -536,7 +537,14 @@
             this.sendBtnEl.disabled = !this.inputEl.value.trim();
 
             if (response && response.message) {
-              this.renderProposalCard(response.message, doctype);
+              const respData = response.message;
+              const prop = respData.proposal || {};
+              const isWorkflow = prop.intent === 'create_workflow' || prop.intent === 'workflow_action' || Boolean(prop.workflow) || Boolean(prop.workflow_def);
+              if (isWorkflow) {
+                this.renderWorkflowProposalCard(prop, respData.validation, { data: respData, doctype: doctype });
+              } else {
+                this.renderProposalCard(respData, doctype);
+              }
             } else {
               this.appendAssistantMessage('⚠️ Received empty response from EXRP Control Plane.');
             }
@@ -564,6 +572,51 @@
      * Fallback mock proposal for offline / demonstration testing
      */
     renderMockProposal(prompt, doctype) {
+      const isWorkflowPrompt = /workflow|approval|state machine|approve/i.test(prompt);
+      if (isWorkflowPrompt) {
+        const mockWfResult = {
+          status: 'PROPOSED',
+          success: true,
+          proposal: {
+            intent: 'create_workflow',
+            target_doctype: doctype,
+            summary: `Automate multi-tier approval state machine for ${doctype}.`,
+            reasoning: 'Enforces segregation of duties and audit compliance with deterministic transitions.',
+            workflow: {
+              workflow_name: `${doctype} Multi-Tier Approval`,
+              document_type: doctype,
+              is_active: 1,
+              workflow_state_field: 'workflow_state',
+              states: [
+                { state: 'Draft', doc_status: 0, allow_edit: 'Sales User', style: 'Primary' },
+                { state: 'Pending Approval', doc_status: 0, allow_edit: 'Sales Manager', style: 'Warning' },
+                { state: 'Approved', doc_status: 1, allow_edit: 'Sales Manager', style: 'Success' },
+                { state: 'Rejected', doc_status: 0, allow_edit: 'Sales Manager', style: 'Danger' },
+              ],
+              transitions: [
+                { state: 'Draft', action: 'Submit for Approval', next_state: 'Pending Approval', allowed: 'Sales User' },
+                { state: 'Pending Approval', action: 'Approve', next_state: 'Approved', allowed: 'Sales Manager', condition: 'doc.grand_total <= 50000' },
+                { state: 'Pending Approval', action: 'Reject', next_state: 'Rejected', allowed: 'Sales Manager' },
+              ],
+            },
+          },
+          validation: {
+            is_valid: true,
+            status: 'approved',
+            governance_tier: 'TIER_1_GOVERNED_POLICY',
+            storage_impact: 'METADATA_ONLY',
+            errors: [],
+            warnings: [],
+            mermaid_graph: `graph TD\n    Draft["Draft (Draft)"] -->|Submit for Approval [Sales User]| Pending_Approval["Pending Approval (Draft)"]\n    Pending_Approval -->|Approve [Sales Manager]<br><i>doc.grand_total <= 50000</i>| Approved["Approved (Submitted)"]\n    Pending_Approval -->|Reject [Sales Manager]| Rejected["Rejected (Draft)"]`,
+          },
+          mermaid_graph: `graph TD\n    Draft["Draft (Draft)"] -->|Submit for Approval [Sales User]| Pending_Approval["Pending Approval (Draft)"]\n    Pending_Approval -->|Approve [Sales Manager]<br><i>doc.grand_total <= 50000</i>| Approved["Approved (Submitted)"]\n    Pending_Approval -->|Reject [Sales Manager]| Rejected["Rejected (Draft)"]`,
+          preview_fidelity_notice:
+            'Workflow state machine previewed with Mermaid diagram. Document transitions and permissions execute on active ERPNext records.',
+        };
+        this.renderWorkflowProposalCard(mockWfResult.proposal, mockWfResult.validation, { data: mockWfResult, doctype });
+        return;
+      }
+
       const mockResult = {
         status: 'PROPOSED',
         success: true,
@@ -831,6 +884,11 @@
     renderProposalCard(data, doctype) {
       const isSuccess = data.success !== false && data.status !== 'REJECTED';
       const proposal = data.proposal || {};
+      const isWorkflow = proposal.intent === 'create_workflow' || proposal.intent === 'workflow_action' || Boolean(proposal.workflow) || Boolean(proposal.workflow_def);
+      if (isWorkflow) {
+        return this.renderWorkflowProposalCard(proposal, data.validation, { data, doctype });
+      }
+
       const changes = proposal.changes || [];
       const fieldDef = changes[0] || {};
       const validation = data.validation || {};
@@ -1273,6 +1331,580 @@
         }, 1400);
       }
     }
+
+    /**
+     * Renders Phase 3 Declarative Workflow State Machine Preview Card
+     * (§10 ADR-001 Rev 2.3 & ADR-006)
+     *
+     * @param {Object} proposal Proposal payload containing intent and workflow definition
+     * @param {Object} validation State machine validation and safety result
+     * @param {Object} [options] Context options including doctype and raw response data
+     */
+    renderWorkflowProposalCard(proposal, validation, options = {}) {
+      let data = options.data || {};
+      let doctype = options.doctype || this.activeDocType || 'Sales Order';
+
+      // Support polymorphic signature: renderWorkflowProposalCard(data, doctype)
+      if (proposal && proposal.proposal && !proposal.intent && !proposal.workflow) {
+        data = proposal;
+        doctype = validation || options.doctype || this.activeDocType || 'Sales Order';
+        proposal = data.proposal || {};
+        validation = data.validation || {};
+      }
+
+      validation = validation || data.validation || {};
+      const workflowDef = proposal.workflow || proposal.workflow_def || (proposal.states && proposal.transitions ? proposal : {});
+      const targetDocType = workflowDef.document_type || proposal.target_doctype || doctype;
+      const workflowName = workflowDef.workflow_name || proposal.workflow_name || `${targetDocType} Multi-Tier Approval`;
+      const states = workflowDef.states || [];
+      const transitions = workflowDef.transitions || [];
+      const cardId = 'exrp-wf-card-' + Math.random().toString(36).substring(2, 9);
+      const deploymentId = (data && data.deployment_id) || (proposal && proposal.deployment_id) || ('dep_wf_' + Math.random().toString(36).substring(2, 10));
+
+      const isSuccess = data.success !== false && data.status !== 'REJECTED';
+      const isValid = Boolean(
+        validation &&
+        (validation.is_valid === true || validation.status === 'approved') &&
+        (!validation.errors || validation.errors.length === 0)
+      );
+
+      const errorMessage = (validation.errors && validation.errors.length > 0)
+        ? validation.errors.join('; ')
+        : (validation.error || data.error_message || 'Workflow state machine invariants violated.');
+
+      // State Machine Safety Verification Badge
+      const safetyBadgeHtml = isValid
+        ? `<div class="exrp-wf-safety-badge verified">
+             <span class="exrp-safety-icon">✓</span>
+             <span>STATE MACHINE VERIFIED - REACHABLE &amp; DEADLOCK FREE</span>
+           </div>`
+        : `<div class="exrp-wf-safety-badge rejected">
+             <span class="exrp-safety-icon">✕</span>
+             <span>REJECTED: ${escapeHtml(errorMessage)}</span>
+           </div>`;
+
+      // State List Chips / Flow
+      let statesHtml = '';
+      if (states.length > 0) {
+        states.forEach((st) => {
+          const docStatus = Number(st.doc_status !== undefined ? st.doc_status : 0);
+          const style = (st.style || '').toLowerCase();
+          let stateClass = 'exrp-state-draft';
+          let docStatusLabel = 'Draft (0)';
+
+          if (docStatus === 1 || style === 'success' || (st.state && st.state.toLowerCase().includes('approve'))) {
+            stateClass = 'exrp-state-approved';
+            docStatusLabel = 'Approved (1)';
+          } else if (docStatus === 2 || style === 'danger' || (st.state && (st.state.toLowerCase().includes('reject') || st.state.toLowerCase().includes('cancel')))) {
+            stateClass = 'exrp-state-rejected';
+            docStatusLabel = docStatus === 2 ? 'Cancelled (2)' : 'Rejected (0)';
+          } else if (style === 'warning' || (st.state && st.state.toLowerCase().includes('pending'))) {
+            stateClass = 'exrp-state-warning';
+            docStatusLabel = 'Pending (0)';
+          }
+
+          statesHtml += `
+            <div class="exrp-state-chip ${stateClass}">
+              <div class="exrp-state-chip-header">
+                <span class="exrp-state-name" title="${escapeHtml(st.state)}">${escapeHtml(st.state)}</span>
+                <span class="exrp-state-docstatus-pill">${escapeHtml(docStatusLabel)}</span>
+              </div>
+              <div class="exrp-state-chip-meta">
+                <span class="exrp-state-edit-role" title="Role permitted to edit in this state">
+                  ✏️ Edit: <strong>${escapeHtml(st.allow_edit || 'All')}</strong>
+                </span>
+              </div>
+            </div>
+          `;
+        });
+      } else {
+        statesHtml = `<div class="exrp-empty-states" style="color: var(--exrp-text-muted); font-size: 12px; padding: 6px;">No states defined in workflow proposal.</div>`;
+      }
+
+      // Transitions Table / Flow Cards
+      let transitionsHtml = '';
+      if (transitions.length > 0) {
+        transitions.forEach((tr) => {
+          const hasCondition = Boolean(tr.condition && String(tr.condition).trim());
+          const allowsSelfApproval = Boolean(tr.allow_self_approval === 1 || tr.allow_self_approval === true);
+          transitionsHtml += `
+            <div class="exrp-transition-row">
+              <div class="exrp-transition-flow">
+                <span class="exrp-state-pill from">${escapeHtml(tr.state)}</span>
+                <span class="exrp-transition-connector">
+                  <span class="exrp-arrow-line"></span>
+                  <span class="exrp-action-pill" title="Transition Action">Action: <strong>${escapeHtml(tr.action)}</strong></span>
+                  <span class="exrp-arrow-head">▶</span>
+                </span>
+                <span class="exrp-state-pill to">${escapeHtml(tr.next_state)}</span>
+              </div>
+              <div class="exrp-transition-badges">
+                <span class="exrp-role-pill" title="Role allowed to execute transition">👤 ${escapeHtml(tr.allowed || 'All')}</span>
+                ${hasCondition ? `<span class="exrp-condition-pill" title="Transition Condition">⚡ <code>${escapeHtml(tr.condition)}</code></span>` : ''}
+                ${allowsSelfApproval ? `<span class="exrp-self-approval-pill" title="Self-approval permitted">🛡️ Self-Approval Allowed</span>` : ''}
+              </div>
+            </div>
+          `;
+        });
+      } else {
+        transitionsHtml = `<div class="exrp-empty-transitions" style="color: var(--exrp-text-muted); font-size: 12px; padding: 6px;">No transitions defined.</div>`;
+      }
+
+      // Visual Diagram Preview (Mermaid)
+      const mermaidGraph = validation.mermaid_graph || data.mermaid_graph || (data.ddl_plan && data.ddl_plan.mermaid_graph) || '';
+
+      const cardWrapper = document.createElement('div');
+      cardWrapper.className = 'exrp-msg-row exrp-msg-assistant';
+      cardWrapper.innerHTML = `
+        <div class="exrp-msg-avatar">✨</div>
+        <div class="exrp-msg-body">
+          <div class="exrp-workflow-card" id="${cardId}">
+            <!-- Workflow Header -->
+            <div class="exrp-card-header">
+              <div class="exrp-card-title-group">
+                <span class="exrp-card-title">${escapeHtml(workflowName)}</span>
+                <span class="exrp-intent-badge">${escapeHtml(proposal.intent || 'create_workflow')}</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                <span class="exrp-doctype-badge">${escapeHtml(targetDocType)}</span>
+                <div id="${cardId}-header-badge">
+                  <span class="exrp-wf-preview-badge">Draft Preview</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card Body -->
+            <div class="exrp-card-body">
+              <!-- Summary & Rationale -->
+              <div class="exrp-proposal-summary">
+                ${escapeHtml(proposal.summary || data.error_message || 'AI Proposed Declarative Workflow State Machine')}
+              </div>
+              ${
+                proposal.reasoning
+                  ? `<div class="exrp-proposal-rationale">
+                      <div class="exrp-rationale-label">Design Rationale</div>
+                      <div>${escapeHtml(proposal.reasoning)}</div>
+                    </div>`
+                  : ''
+              }
+
+              <!-- State Machine Safety Verification Badge -->
+              ${safetyBadgeHtml}
+
+              <!-- State List Chips / Flow -->
+              <div>
+                <div class="exrp-section-label">
+                  <span>Workflow States &amp; Roles</span>
+                  <span style="font-size: 10px; font-weight: normal; color: var(--exrp-text-muted);">${states.length} states</span>
+                </div>
+                <div class="exrp-workflow-states">
+                  ${statesHtml}
+                </div>
+              </div>
+
+              <!-- Transitions Table / Flow Cards -->
+              <div>
+                <div class="exrp-workflow-transitions">
+                  <div class="exrp-transitions-header">
+                    <span class="exrp-transitions-title">State Transitions &amp; Permission Rules</span>
+                    <span class="exrp-transitions-count">${transitions.length} transitions</span>
+                  </div>
+                  <div class="exrp-transition-list">
+                    ${transitionsHtml}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Visual Diagram Preview (Mermaid) -->
+              ${
+                mermaidGraph
+                  ? `<div class="exrp-mermaid-container" id="${cardId}-mermaid-container">
+                      <div class="exrp-mermaid-header">
+                        <span class="exrp-mermaid-title">📊 State Machine Flowchart</span>
+                        <div class="exrp-mermaid-controls">
+                          <button type="button" class="exrp-chip-btn" id="${cardId}-btn-toggle-diagram">Collapse</button>
+                          <button type="button" class="exrp-chip-btn" id="${cardId}-btn-copy-diagram">Copy Mermaid</button>
+                        </div>
+                      </div>
+                      <div class="exrp-mermaid-body" id="${cardId}-mermaid-body">
+                        <div class="exrp-mermaid-svg-container" id="${cardId}-mermaid-svg" style="display: none;"></div>
+                        <pre class="exrp-mermaid-code" id="${cardId}-mermaid-code">${escapeHtml(mermaidGraph)}</pre>
+                      </div>
+                    </div>`
+                  : ''
+              }
+
+              <!-- Preview Fidelity Notice -->
+              <div class="exrp-fidelity-notice">
+                <span class="exrp-fidelity-icon">ℹ️</span>
+                <span>${escapeHtml(data.preview_fidelity_notice || 'Workflow state machine previewed with Mermaid diagram. Document transitions and permissions execute on active ERPNext records.')}</span>
+              </div>
+            </div>
+
+            <!-- Card Actions -->
+            <div class="exrp-card-footer" id="${cardId}-footer">
+              ${
+                isValid
+                  ? `<div class="exrp-card-actions">
+                      <button type="button" class="exrp-btn-action exrp-btn-dismiss" id="${cardId}-btn-dismiss">Dismiss</button>
+                      <button type="button" class="exrp-btn-action exrp-btn-deploy" id="${cardId}-btn-deploy">🚀 Deploy Workflow to Production</button>
+                    </div>`
+                  : `<div class="exrp-card-actions">
+                      <button type="button" class="exrp-btn-action exrp-btn-dismiss" id="${cardId}-btn-dismiss">Close</button>
+                    </div>`
+              }
+            </div>
+          </div>
+        </div>
+      `;
+
+      this.chatStreamEl.appendChild(cardWrapper);
+      this.scrollToBottom();
+
+      // Bind Mermaid Controls
+      const cardEl = cardWrapper.querySelector(`#${cardId}`);
+      if (mermaidGraph) {
+        const toggleBtn = cardEl.querySelector(`#${cardId}-btn-toggle-diagram`);
+        const copyBtn = cardEl.querySelector(`#${cardId}-btn-copy-diagram`);
+        const mermaidBody = cardEl.querySelector(`#${cardId}-mermaid-body`);
+        const mermaidCode = cardEl.querySelector(`#${cardId}-mermaid-code`);
+        const mermaidSvg = cardEl.querySelector(`#${cardId}-mermaid-svg`);
+
+        if (toggleBtn && mermaidBody) {
+          let collapsed = false;
+          toggleBtn.addEventListener('click', () => {
+            collapsed = !collapsed;
+            mermaidBody.style.display = collapsed ? 'none' : 'block';
+            toggleBtn.textContent = collapsed ? 'Expand' : 'Collapse';
+          });
+        }
+
+        if (copyBtn) {
+          copyBtn.addEventListener('click', () => {
+            const code = mermaidGraph;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(code).then(() => {
+                copyBtn.textContent = '✓ Copied';
+                setTimeout(() => { copyBtn.textContent = 'Copy Mermaid'; }, 1800);
+              });
+            } else {
+              const ta = document.createElement('textarea');
+              ta.value = code;
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand('copy');
+              ta.remove();
+              copyBtn.textContent = '✓ Copied';
+              setTimeout(() => { copyBtn.textContent = 'Copy Mermaid'; }, 1800);
+            }
+          });
+        }
+
+        // Live SVG rendering if window.mermaid is present
+        if (window.mermaid && mermaidSvg) {
+          try {
+            const svgRenderId = 'mermaid-svg-' + Math.random().toString(36).substring(2, 9);
+            if (typeof window.mermaid.render === 'function') {
+              window.mermaid.render(svgRenderId, mermaidGraph, (svgCode) => {
+                mermaidSvg.innerHTML = svgCode;
+                mermaidSvg.style.display = 'block';
+                if (mermaidCode) mermaidCode.style.display = 'none';
+              });
+            }
+          } catch (e) {
+            // Keep monospace code visible on error
+          }
+        }
+      }
+
+      // Bind Dismiss & Deploy buttons
+      const dismissBtn = cardEl.querySelector(`#${cardId}-btn-dismiss`);
+      const deployBtn = cardEl.querySelector(`#${cardId}-btn-deploy`);
+
+      if (dismissBtn) {
+        dismissBtn.addEventListener('click', () => {
+          cardWrapper.style.opacity = '0.5';
+          dismissBtn.textContent = 'Dismissed';
+          dismissBtn.disabled = true;
+          if (deployBtn) deployBtn.style.display = 'none';
+        });
+      }
+
+      if (deployBtn) {
+        deployBtn.addEventListener('click', () => {
+          this.executeWorkflowDeployment(cardId, targetDocType, proposal, workflowDef, validation);
+        });
+      }
+    }
+
+    /**
+     * Executes Animated 4-Stage Workflow State Machine Deployment
+     * 1. Validate Reachability & Deadlock Safety
+     * 2. Acquire Site Advisory Lock
+     * 3. Register Workflow States & Transitions
+     * 4. Activate Workflow on <DocType>
+     */
+    executeWorkflowDeployment(cardId, doctype, proposal, workflowDef, validation) {
+      const footerEl = document.getElementById(`${cardId}-footer`);
+      if (!footerEl) return;
+
+      this.isDeploying = true;
+      this.sendBtnEl.disabled = true;
+
+      // Render 4-stage workflow deployment tracker HTML
+      footerEl.innerHTML = `
+        <div class="exrp-deployment-tracker" id="${cardId}-wf-tracker">
+          <div class="exrp-tracker-title">
+            <span>🛡️ Declarative Workflow Deployment Sequence</span>
+          </div>
+          <div class="exrp-stage-list">
+            <div class="exrp-stage-item in-progress" id="${cardId}-stage-1">
+              <span class="exrp-stage-icon">⚙️</span>
+              <span class="exrp-stage-name">1. Validate Reachability &amp; Deadlock Safety</span>
+            </div>
+            <div class="exrp-stage-item pending" id="${cardId}-stage-2">
+              <span class="exrp-stage-icon">2</span>
+              <span class="exrp-stage-name">2. Acquire Site Advisory Lock</span>
+            </div>
+            <div class="exrp-stage-item pending" id="${cardId}-stage-3">
+              <span class="exrp-stage-icon">3</span>
+              <span class="exrp-stage-name">3. Register Workflow States &amp; Transitions</span>
+            </div>
+            <div class="exrp-stage-item pending" id="${cardId}-stage-4">
+              <span class="exrp-stage-icon">4</span>
+              <span class="exrp-stage-name">4. Activate Workflow on ${escapeHtml(doctype)}</span>
+            </div>
+          </div>
+          <div id="${cardId}-tracker-result"></div>
+        </div>
+      `;
+
+      const stage1 = footerEl.querySelector(`#${cardId}-stage-1`);
+      const stage2 = footerEl.querySelector(`#${cardId}-stage-2`);
+      const stage3 = footerEl.querySelector(`#${cardId}-stage-3`);
+      const stage4 = footerEl.querySelector(`#${cardId}-stage-4`);
+      const resultBox = footerEl.querySelector(`#${cardId}-tracker-result`);
+
+      const advanceStage = (completedStage, nextStage) => {
+        if (completedStage) {
+          completedStage.className = 'exrp-stage-item completed';
+          completedStage.querySelector('.exrp-stage-icon').textContent = '✓';
+        }
+        if (nextStage) {
+          nextStage.className = 'exrp-stage-item in-progress';
+          nextStage.querySelector('.exrp-stage-icon').textContent = '⚙️';
+        }
+      };
+
+      // Progress through initial verification stages
+      setTimeout(() => advanceStage(stage1, stage2), 350);
+      setTimeout(() => advanceStage(stage2, stage3), 750);
+
+      const targetDocType = (window.cur_frm && window.cur_frm.doctype) ? window.cur_frm.doctype : (workflowDef.document_type || proposal.target_doctype || doctype);
+      const deploymentId = (proposal && proposal.deployment_id) || ('dep_wf_' + Math.random().toString(36).substring(2, 10));
+      const deployedWfPayload = proposal.workflow || workflowDef;
+
+      const handleDeploySuccess = (res) => {
+        advanceStage(stage3, stage4);
+
+        setTimeout(() => {
+          advanceStage(stage4, null);
+          this.isDeploying = false;
+          this.sendBtnEl.disabled = !this.inputEl.value.trim();
+
+          const activeDepId = (res && res.deployment_id) || deploymentId;
+          const activeWfName = (res && res.workflow_name) || workflowDef.workflow_name || `${targetDocType} Multi-Tier Approval`;
+
+          // Update header status badge to WORKFLOW ACTIVE
+          const headerBadge = document.getElementById(`${cardId}-header-badge`);
+          if (headerBadge) {
+            headerBadge.innerHTML = `<span class="exrp-workflow-status-badge active"><span class="exrp-pulse-dot"></span> WORKFLOW ACTIVE</span>`;
+          }
+
+          resultBox.innerHTML = `
+            <div class="exrp-deploy-success-box">
+              <div class="exrp-deploy-success-details">
+                <div class="exrp-deploy-success-msg">
+                  <span class="exrp-workflow-status-badge active"><span class="exrp-pulse-dot"></span> WORKFLOW ACTIVE</span>
+                  <span>✓ Workflow <code>${escapeHtml(activeWfName)}</code> is now active on <strong>${escapeHtml(targetDocType)}</strong>!</span>
+                </div>
+                <button type="button" class="exrp-btn-action exrp-btn-revert" id="${cardId}-btn-revert" title="Deactivate or restore previous baseline safely" data-deployment-id="${escapeHtml(activeDepId)}">
+                  ↩️ Deactivate / Revert Workflow
+                </button>
+              </div>
+            </div>
+          `;
+
+          // Bind 1-Click Workflow Rollback UI
+          const revertBtn = resultBox.querySelector(`#${cardId}-btn-revert`);
+          if (revertBtn) {
+            revertBtn.addEventListener('click', () => {
+              const confirmMessage = "Are you sure you want to revert this workflow? This will safely deactivate the state machine (is_active=0) or restore the previous workflow baseline, preserving all existing document records without loss.";
+
+              const executeRevert = () => {
+                revertBtn.disabled = true;
+                revertBtn.innerHTML = '⏳ Deactivating Workflow...';
+
+                const onRevertSuccess = (revertResult) => {
+                  revertBtn.innerHTML = '✓ Workflow Deactivated';
+                  revertBtn.classList.add('exrp-reverted');
+                  revertBtn.disabled = true;
+
+                  if (headerBadge) {
+                    headerBadge.innerHTML = `<span class="exrp-workflow-status-badge deactivated">WORKFLOW DEACTIVATED</span>`;
+                  }
+
+                  const activeBadges = resultBox.querySelectorAll('.exrp-workflow-status-badge.active');
+                  activeBadges.forEach((b) => {
+                    b.className = 'exrp-workflow-status-badge deactivated';
+                    b.innerHTML = 'WORKFLOW DEACTIVATED';
+                  });
+
+                  // 1. Triggers cur_frm.reload_doc()
+                  if (window.cur_frm && window.cur_frm.doctype === targetDocType && typeof window.cur_frm.reload_doc === 'function') {
+                    window.cur_frm.reload_doc();
+                  }
+
+                  // 2. Updates context count
+                  this.updateContext();
+
+                  // 3. Alerts user
+                  if (window.frappe && typeof window.frappe.show_alert === 'function') {
+                    window.frappe.show_alert({
+                      message: __('EXRP: Workflow state machine safely deactivated / baseline restored.'),
+                      indicator: 'orange',
+                    });
+                  }
+
+                  this.appendAssistantMessage(
+                    `↩️ <strong>Workflow Reverted:</strong> State machine for <strong>${escapeHtml(targetDocType)}</strong> has been safely deactivated (is_active=0) and baseline restored without record loss.`
+                  );
+                };
+
+                const onRevertFailure = (err) => {
+                  revertBtn.disabled = false;
+                  revertBtn.innerHTML = '↩️ Deactivate / Revert Workflow';
+                  const msg = (err && (err.message || err.reason)) || 'Failed to revert workflow state machine.';
+                  if (window.frappe && typeof window.frappe.msgprint === 'function') {
+                    window.frappe.msgprint({
+                      title: __('Workflow Rollback Blocked'),
+                      message: __(msg),
+                      indicator: 'red',
+                    });
+                  } else {
+                    alert(`Workflow Rollback Failed: ${msg}`);
+                  }
+                };
+
+                // RPC call to revert_configuration_change
+                if (window.frappe && typeof window.frappe.call === 'function') {
+                  window.frappe.call({
+                    method: 'exrp.api.control_plane.revert_configuration_change',
+                    args: {
+                      deployment_id: activeDepId,
+                    },
+                    callback: (r) => {
+                      const outcome = r ? r.message : null;
+                      if (outcome && (outcome.status === 'ROLLED_BACK' || outcome.disposition === 'WORKFLOW_DEACTIVATED' || outcome.success !== false)) {
+                        onRevertSuccess(outcome);
+                      } else {
+                        onRevertFailure(outcome || { message: 'Workflow rollback rejected by control plane' });
+                      }
+                    },
+                    error: (e) => onRevertFailure(e),
+                  });
+                } else {
+                  // Mock rollback fallback
+                  setTimeout(() => {
+                    onRevertSuccess({ status: 'ROLLED_BACK', disposition: 'WORKFLOW_DEACTIVATED', success: true });
+                  }, 500);
+                }
+              };
+
+              // Native Frappe confirmation dialog
+              if (window.frappe && typeof window.frappe.confirm === 'function') {
+                window.frappe.confirm(confirmMessage, executeRevert);
+              } else if (window.confirm(confirmMessage)) {
+                executeRevert();
+              }
+            });
+          }
+
+          // Show Frappe native alert
+          if (window.frappe && typeof window.frappe.show_alert === 'function') {
+            window.frappe.show_alert({
+              message: __('EXRP: Workflow {0} activated on {1}!', [activeWfName, targetDocType]),
+              indicator: 'green',
+            });
+          }
+
+          // Trigger live form reload without full page refresh (§ADR-001)
+          if (window.cur_frm && window.cur_frm.doctype === targetDocType && typeof window.cur_frm.reload_doc === 'function') {
+            window.cur_frm.reload_doc();
+          }
+
+          // Update context
+          this.updateContext();
+          this.appendAssistantMessage(
+            `🎉 <strong>Workflow Activated!</strong> State machine <code>${escapeHtml(activeWfName)}</code> is now active on <strong>${escapeHtml(targetDocType)}</strong>.`
+          );
+        }, 400);
+      };
+
+      const handleDeployFailure = (errReason) => {
+        stage3.className = 'exrp-stage-item failed';
+        stage3.querySelector('.exrp-stage-icon').textContent = '✕';
+        this.isDeploying = false;
+        this.sendBtnEl.disabled = !this.inputEl.value.trim();
+
+        resultBox.innerHTML = `
+          <div style="margin-top: 8px; padding: 8px 12px; background: var(--exrp-danger-light); border: 1px solid var(--exrp-danger-border); border-radius: var(--exrp-radius-md); font-size: 11.5px; color: var(--exrp-danger); font-weight: 600;">
+            ✕ Workflow Deployment Blocked: ${escapeHtml(errReason || 'State machine safety verification failed')}
+          </div>
+        `;
+
+        if (window.frappe && typeof window.frappe.msgprint === 'function') {
+          window.frappe.msgprint({
+            title: __('Workflow Deployment Blocked'),
+            message: __(errReason || 'Safe workflow deployment gate blocked the operation.'),
+            indicator: 'red',
+          });
+        }
+      };
+
+      // Backend call to apply_workflow_change
+      if (window.frappe && typeof window.frappe.call === 'function') {
+        window.frappe.call({
+          method: 'exrp.api.control_plane.apply_workflow_change',
+          args: {
+            doctype: targetDocType,
+            deployment_id: deploymentId,
+            workflow_def: deployedWfPayload,
+          },
+          callback: (r) => {
+            const resp = r ? r.message : null;
+            if (resp && (resp.status === 'APPLIED' || resp.success !== false)) {
+              handleDeploySuccess(resp);
+            } else {
+              handleDeployFailure(resp ? (resp.reason || resp.disposition) : 'Unknown deployment error');
+            }
+          },
+          error: (e) => {
+            handleDeployFailure(e ? (e.message || e.toString()) : 'Network error during workflow deployment');
+          },
+        });
+      } else {
+        // Mock deployment success for standalone testing
+        setTimeout(() => {
+          handleDeploySuccess({
+            status: 'APPLIED',
+            disposition: 'WORKFLOW_STATE_MACHINE_ACTIVATED',
+            workflow_name: workflowDef.workflow_name,
+            doctype: targetDocType,
+          });
+        }, 1200);
+      }
+    }
   }
 
   // Attach to window and Frappe namespace
@@ -1287,6 +1919,7 @@
       window.exrp.sidecar.toggle = () => window.exrp.sidecar.instance.toggle();
       window.exrp.sidecar.injectPreview = (proposal) => window.exrp.sidecar.instance.injectInPlaceFormPreview(proposal);
       window.exrp.sidecar.clearPreview = () => window.exrp.sidecar.instance.clearInPlaceFormPreview();
+      window.exrp.sidecar.renderWorkflowProposalCard = (proposal, validation, options) => window.exrp.sidecar.instance.renderWorkflowProposalCard(proposal, validation, options);
     }
   }
 

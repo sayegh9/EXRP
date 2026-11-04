@@ -161,15 +161,88 @@ def execute_rollback(
         }
 
     try:
-        # Step 5: Classify deployment type (Property Setter vs Custom Field)
+        # Step 5: Classify deployment type (Workflow vs Property Setter vs Custom Field)
+        is_workflow = (
+            record.get("deployment_type") == "workflow"
+            or bool(record.get("workflow_name"))
+            or (isinstance(record.get("outcome"), dict) and record["outcome"].get("disposition") == "WORKFLOW_STATE_MACHINE_ACTIVATED")
+            or (isinstance(record.get("baseline_snapshot"), dict) and "deployed_workflow_name" in record["baseline_snapshot"])
+        )
+
         is_property_setter = (
             record.get("deployment_type") == "property_setter"
             or bool(record.get("property_name"))
             or (isinstance(record.get("outcome"), dict) and record["outcome"].get("disposition") == "PROPERTY_SETTER_APPLIED")
-            or "baseline_snapshot" in record
+            or (isinstance(record.get("baseline_snapshot"), dict) and "had_existing_property_setter" in record["baseline_snapshot"])
         )
 
-        if is_property_setter:
+        if is_workflow:
+            # --- WORKFLOW ROLLBACK FLOW (ADR-001 Rev 2.3 §10, ADR-006) ---
+            baseline_snapshot = record.get("baseline_snapshot") or {}
+            deployed_workflow_name = (
+                record.get("workflow_name")
+                or baseline_snapshot.get("deployed_workflow_name")
+                or (record.get("outcome") or {}).get("workflow_name")
+            )
+            had_previous = baseline_snapshot.get("had_active_workflow", False)
+            previous_workflow_name = baseline_snapshot.get("previous_workflow_name")
+
+            if had_previous and previous_workflow_name:
+                # 1. Deactivate deployed workflow
+                if hasattr(db, "set_workflow_active") and callable(getattr(db, "set_workflow_active", None)):
+                    db.set_workflow_active(deployed_workflow_name, 0)
+                elif frappe and hasattr(frappe, "db") and hasattr(frappe.db, "set_value"):
+                    frappe.db.set_value("Workflow", deployed_workflow_name, "is_active", 0)
+
+                # 2. Reactivate previously active workflow
+                if hasattr(db, "set_workflow_active") and callable(getattr(db, "set_workflow_active", None)):
+                    db.set_workflow_active(previous_workflow_name, 1)
+                elif frappe and hasattr(frappe, "db") and hasattr(frappe.db, "set_value"):
+                    frappe.db.set_value("Workflow", previous_workflow_name, "is_active", 1)
+
+                if frappe and hasattr(frappe, "db") and hasattr(frappe.db, "commit"):
+                    frappe.db.commit()
+
+                disposition = "PREVIOUS_WORKFLOW_RESTORED"
+                restored_workflow = previous_workflow_name
+            else:
+                # No previous workflow existed, cleanly deactivate deployed workflow
+                if hasattr(db, "set_workflow_active") and callable(getattr(db, "set_workflow_active", None)):
+                    db.set_workflow_active(deployed_workflow_name, 0)
+                elif frappe and hasattr(frappe, "db") and hasattr(frappe.db, "set_value"):
+                    frappe.db.set_value("Workflow", deployed_workflow_name, "is_active", 0)
+
+                if frappe and hasattr(frappe, "db") and hasattr(frappe.db, "commit"):
+                    frappe.db.commit()
+
+                disposition = "WORKFLOW_DEACTIVATED"
+                restored_workflow = None
+
+            # Clear DocType cache
+            if hasattr(db, "clear_doctype_cache") and callable(getattr(db, "clear_doctype_cache", None)):
+                db.clear_doctype_cache(doctype)
+            if frappe and hasattr(frappe, "clear_cache"):
+                frappe.clear_cache(doctype=doctype)
+
+            execution_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            outcome = {
+                "deployment_id": deployment_id,
+                "status": "ROLLED_BACK",
+                "success": True,
+                "disposition": disposition,
+                "doctype": doctype,
+                "workflow_name": deployed_workflow_name,
+                "restored_workflow": restored_workflow,
+                "execution_time_ms": execution_time_ms,
+            }
+
+            # Marks audit status ROLLED_BACK
+            if hasattr(db, "persist_final_outcome_and_audit") and callable(getattr(db, "persist_final_outcome_and_audit", None)):
+                db.persist_final_outcome_and_audit(deployment_id, {"outcome": outcome})
+
+            return outcome
+
+        elif is_property_setter:
             # --- REVERSIBLE PROPERTY SETTER FLOW ---
             property_name = record.get("property_name")
             if not property_name and isinstance(record.get("outcome"), dict):
