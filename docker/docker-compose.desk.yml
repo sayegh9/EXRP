@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  exrp-desk:
+    image: frappe/erpnext:v15
+    container_name: exrp-desk
+    restart: unless-stopped
+    networks:
+      - docker_default
+    ports:
+      - "8088:8000"
+    environment:
+      - PYTHONPATH=/home/frappe/frappe-bench/apps/exrp
+    volumes:
+      - /home/samx/Documents/projects/EXRP:/home/frappe/frappe-bench/apps/exrp
+      - exrp_sites:/home/frappe/frappe-bench/sites
+      - exrp_assets:/home/frappe/frappe-bench/assets
+    entrypoint: ["/home/frappe/frappe-bench/apps/exrp/docker/desk-entrypoint.sh"]
+
+volumes:
+  exrp_sites:
+    external: true
+  exrp_assets:
+    external: true
+
+networks:
+  docker_default:
+    external: true
