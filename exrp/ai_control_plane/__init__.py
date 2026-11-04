@@ -29,6 +29,15 @@ from .policy_enforcer import (
 
 from .property_setter_engine import execute_property_setter_deployment
 from .rollback_engine import execute_rollback
+from .workflow_engine import (
+    WorkflowStateModel,
+    WorkflowTransitionModel,
+    WorkflowDefinition,
+    WorkflowValidationResult,
+    validate_workflow_state_machine,
+    execute_workflow_deployment,
+    generate_mermaid_graph,
+)
 
 __all__ = [
     "get_compact_doctype_schema",
@@ -39,6 +48,7 @@ __all__ = [
     "validate_ddl_plan",
     "execute_single_field_deployment",
     "execute_property_setter_deployment",
+    "execute_workflow_deployment",
     "execute_rollback",
     "ExhaustiveSnapshot",
     "IdempotencyConflictError",
@@ -53,4 +63,10 @@ __all__ = [
     "RuntimePolicyViolation",
     "RuntimePolicyCatalog",
     "policy_catalog",
+    "WorkflowStateModel",
+    "WorkflowTransitionModel",
+    "WorkflowDefinition",
+    "WorkflowValidationResult",
+    "validate_workflow_state_machine",
+    "generate_mermaid_graph",
 ]

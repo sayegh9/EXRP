@@ -73,7 +73,7 @@ class ConfigurationProposal(BaseModel):
     """
     model_config = ConfigDict(extra="allow")
 
-    intent: Literal["add_custom_fields", "set_property", "workflow_action"] = Field(
+    intent: Literal["add_custom_fields", "set_property", "workflow_action", "create_workflow"] = Field(
         ...,
         description="Declarative configuration intent"
     )
@@ -84,10 +84,21 @@ class ConfigurationProposal(BaseModel):
         default_factory=list,
         description="Proposed change items. Max 1 field in Phase 1 for add_custom_fields."
     )
+    workflow: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Proposed WorkflowDefinition: workflow_name, document_type, is_active, workflow_state_field, states, transitions"
+    )
     governance_tier: int = Field(
         default=1,
         description="Governance Tier (0=Immutable Invariant, 1=Governed Policy, 2=Ordinary Config)"
     )
+
+    @field_validator("workflow", mode="before")
+    @classmethod
+    def normalize_workflow(cls, v: Any) -> Any:
+        if v is not None and hasattr(v, "model_dump"):
+            return v.model_dump()
+        return v
 
 
 class PlannerResult(BaseModel):
@@ -361,51 +372,116 @@ class AIConfigurationPlanner:
                     proposal.summary += " (Phase 1 constraint: truncated to single field deployment unit)"
 
             # 3. Policy & Invariant Safety Evaluation
-            proposal_dict = proposal.model_dump()
-            proposal_dict["target_doctype"] = doctype
-            proposal_dict["user_roles"] = user_roles
+            if proposal.intent in ("create_workflow", "workflow_action"):
+                from exrp.ai_control_plane.workflow_engine import (
+                    validate_workflow_state_machine,
+                    WorkflowDefinition,
+                )
 
-            try:
-                validation_result = validate_mutation_safety(proposal_dict)
+                if not proposal.workflow:
+                    errors = ["Missing workflow definition in proposal."]
+                    reason = f"Workflow state machine validation failed: {', '.join(errors)}"
+                    last_error = reason
+                    feedback = (
+                        f"Your previous workflow proposal was rejected: {', '.join(errors)}. "
+                        "Correct the state machine graph so all states are reachable and meet Frappe docstatus rules."
+                    )
+                    feedback_history.append(feedback)
+                    if attempts > effective_max_retries:
+                        return PlannerResult(
+                            success=False,
+                            proposal=proposal,
+                            validation=None,
+                            ddl_plan=None,
+                            error_message=reason,
+                            attempts=attempts,
+                            feedback_history=feedback_history,
+                        )
+                    continue
+
+                if isinstance(proposal.workflow, dict) and not proposal.workflow.get("document_type"):
+                    proposal.workflow["document_type"] = doctype
+
+                wf_val = validate_workflow_state_machine(proposal.workflow, existing_roles=user_roles)
+                if not wf_val.is_valid:
+                    reason = f"Workflow state machine validation failed: {', '.join(wf_val.errors)}"
+                    last_error = reason
+                    feedback = (
+                        f"Your previous workflow proposal was rejected: {', '.join(wf_val.errors)}. "
+                        "Correct the state machine graph so all states are reachable and meet Frappe docstatus rules."
+                    )
+                    feedback_history.append(feedback)
+                    if attempts > effective_max_retries:
+                        return PlannerResult(
+                            success=False,
+                            proposal=proposal,
+                            validation={
+                                "is_valid": False,
+                                "errors": wf_val.errors,
+                                "mermaid_graph": wf_val.mermaid_graph,
+                            },
+                            ddl_plan=None,
+                            error_message=reason,
+                            attempts=attempts,
+                            feedback_history=feedback_history,
+                        )
+                    continue
+
+                validation_result = {
+                    "status": "approved",
+                    "storage_impact": "METADATA_ONLY",
+                    "governance_tier": "TIER_1_GOVERNED_POLICY",
+                    "mermaid_graph": wf_val.mermaid_graph,
+                    "warnings": getattr(wf_val, "warnings", []),
+                    "is_valid": True,
+                }
                 last_validation = validation_result
-            except ZoneSafetyViolation as exc:
-                reason = str(exc)
-                last_error = reason
-                feedback = (
-                    f"Your previous proposal was rejected: {reason}. "
-                    "Correct the proposal to satisfy enterprise safety invariants."
-                )
-                feedback_history.append(feedback)
-                if attempts > effective_max_retries:
-                    return PlannerResult(
-                        success=False,
-                        proposal=proposal,
-                        validation=None,
-                        ddl_plan=None,
-                        error_message=reason,
-                        attempts=attempts,
-                        feedback_history=feedback_history,
+            else:
+                proposal_dict = proposal.model_dump()
+                proposal_dict["target_doctype"] = doctype
+                proposal_dict["user_roles"] = user_roles
+
+                try:
+                    validation_result = validate_mutation_safety(proposal_dict)
+                    last_validation = validation_result
+                except ZoneSafetyViolation as exc:
+                    reason = str(exc)
+                    last_error = reason
+                    feedback = (
+                        f"Your previous proposal was rejected: {reason}. "
+                        "Correct the proposal to satisfy enterprise safety invariants."
                     )
-                continue
-            except (ValidationError, ValueError) as exc:
-                reason = f"Proposal schema validation error: {exc}"
-                last_error = reason
-                feedback = (
-                    f"Your previous proposal was rejected: {reason}. "
-                    "Correct the proposal to satisfy enterprise safety invariants."
-                )
-                feedback_history.append(feedback)
-                if attempts > effective_max_retries:
-                    return PlannerResult(
-                        success=False,
-                        proposal=proposal,
-                        validation=None,
-                        ddl_plan=None,
-                        error_message=reason,
-                        attempts=attempts,
-                        feedback_history=feedback_history,
+                    feedback_history.append(feedback)
+                    if attempts > effective_max_retries:
+                        return PlannerResult(
+                            success=False,
+                            proposal=proposal,
+                            validation=None,
+                            ddl_plan=None,
+                            error_message=reason,
+                            attempts=attempts,
+                            feedback_history=feedback_history,
+                        )
+                    continue
+                except (ValidationError, ValueError) as exc:
+                    reason = f"Proposal schema validation error: {exc}"
+                    last_error = reason
+                    feedback = (
+                        f"Your previous proposal was rejected: {reason}. "
+                        "Correct the proposal to satisfy enterprise safety invariants."
                     )
-                continue
+                    feedback_history.append(feedback)
+                    if attempts > effective_max_retries:
+                        return PlannerResult(
+                            success=False,
+                            proposal=proposal,
+                            validation=None,
+                            ddl_plan=None,
+                            error_message=reason,
+                            attempts=attempts,
+                            feedback_history=feedback_history,
+                        )
+                    continue
 
             # 4. DDL Plan Gate Inspection (Zero DDL executed)
             ddl_plan_dict = None
@@ -507,6 +583,14 @@ class AIConfigurationPlanner:
             "6. Invariant Protection: NEVER modify, delete, or relax protected ERP standard fields "
             "(e.g., total, rate, amount, docstatus).\n"
             "7. Compliance Lock: NEVER modify Zone 2 locked DocTypes (e.g. GL Entry, Journal Entry, User, Role).\n"
+            "8. For 'create_workflow':\n"
+            "   - Set intent to 'create_workflow' and populate 'workflow' field adhering to WorkflowDefinition.\n"
+            "   - Must define states with state name, doc_status (0 for Draft/review, 1 for Approved, 2 for Cancelled/Rejected), and allow_edit role.\n"
+            "   - Must define transitions between states with action name, allowed role, and optional condition.\n"
+            "   - Initial state must have doc_status 0.\n"
+            "   - All states must be reachable from initial state (no orphaned states).\n"
+            "   - All non-terminal states must have outgoing transitions (no deadlock states).\n"
+            "   - Workflows are strictly PROHIBITED on Tier 0 locked DocTypes (e.g. GL Entry, User, Role).\n"
         )
 
         user_content = (
@@ -567,7 +651,7 @@ class AIConfigurationPlanner:
 
         return str(response)
 
-    def _generate_mock_proposal(
+    def _mock_plan(
         self,
         doctype: str,
         user_prompt: str,
@@ -577,12 +661,137 @@ class AIConfigurationPlanner:
         """
         Deterministic heuristic mock generator for offline and CI environments.
         Accurately parses prompts, obeys self-correction feedback history, and tests
-        single-field limits, invariant protections, and DDL plan gate behaviors.
+        single-field limits, invariant protections, declarative workflows, and DDL plan gate behaviors.
         """
         prompt_lower = user_prompt.lower()
 
+        # Workflow detection keywords
+        workflow_keywords = (
+            "approval",
+            "workflow",
+            "stage",
+            "sign-off",
+            "reject",
+            "submit for approval",
+        )
+        is_workflow = any(kw in prompt_lower for kw in workflow_keywords)
+        is_attack_doctype = doctype in ZONE_2_LOCKED_DOCTYPES or doctype == "GL Entry"
+
+        if is_workflow:
+            if is_attack_doctype:
+                return ConfigurationProposal(
+                    intent="create_workflow",
+                    target_doctype=doctype,
+                    summary=f"Attempted workflow on protected DocType {doctype}",
+                    reasoning=f"Mock generator simulated workflow on Tier 0 locked DocType {doctype}",
+                    governance_tier=0,
+                    workflow={
+                        "workflow_name": f"{doctype} Approval",
+                        "document_type": doctype,
+                        "is_active": True,
+                        "workflow_state_field": "workflow_state",
+                        "states": [
+                            {"state": "Draft", "doc_status": 0, "allow_edit": "Sales User", "style": "Inverse"},
+                            {"state": "Pending Manager Approval", "doc_status": 0, "allow_edit": "Sales Manager", "style": "Warning"},
+                            {"state": "Approved", "doc_status": 1, "allow_edit": "Sales Manager", "style": "Success"},
+                            {"state": "Rejected", "doc_status": 0, "allow_edit": "Sales Manager", "style": "Danger"},
+                        ],
+                        "transitions": [
+                            {"state": "Draft", "action": "Submit for Approval", "next_state": "Pending Manager Approval", "allowed": "Sales User", "condition": "doc.grand_total > 10000", "allow_self_approval": False},
+                            {"state": "Draft", "action": "Approve Directly", "next_state": "Approved", "allowed": "Sales Manager", "condition": "doc.grand_total <= 10000", "allow_self_approval": False},
+                            {"state": "Pending Manager Approval", "action": "Approve", "next_state": "Approved", "allowed": "Sales Manager", "condition": None, "allow_self_approval": False},
+                            {"state": "Pending Manager Approval", "action": "Reject", "next_state": "Rejected", "allowed": "Sales Manager", "condition": None, "allow_self_approval": False},
+                        ],
+                    },
+                )
+
+            has_workflow_feedback = any(
+                "workflow" in fb.lower() or "reachable" in fb.lower() or "rejected" in fb.lower()
+                for fb in feedback_history
+            )
+            if ("unreachable" in prompt_lower or "test_self_correction" in prompt_lower) and not has_workflow_feedback and attempt == 1:
+                return ConfigurationProposal(
+                    intent="create_workflow",
+                    target_doctype=doctype,
+                    summary=f"Create workflow for {doctype} (initial attempt with unreachable state)",
+                    reasoning="Simulating invalid workflow with unreachable state to test self-correction feedback loop",
+                    governance_tier=1,
+                    workflow={
+                        "workflow_name": f"{doctype} Approval",
+                        "document_type": doctype,
+                        "is_active": True,
+                        "workflow_state_field": "workflow_state",
+                        "states": [
+                            {"state": "Draft", "doc_status": 0, "allow_edit": "Sales User", "style": "Inverse"},
+                            {"state": "Pending Manager Approval", "doc_status": 0, "allow_edit": "Sales Manager", "style": "Warning"},
+                            {"state": "Approved", "doc_status": 1, "allow_edit": "Sales Manager", "style": "Success"},
+                            {"state": "Rejected", "doc_status": 0, "allow_edit": "Sales Manager", "style": "Danger"},
+                            {"state": "Orphaned State", "doc_status": 0, "allow_edit": "Sales Manager", "style": "Warning"},
+                        ],
+                        "transitions": [
+                            {"state": "Draft", "action": "Submit for Approval", "next_state": "Pending Manager Approval", "allowed": "Sales User", "condition": "doc.grand_total > 10000", "allow_self_approval": False},
+                            {"state": "Draft", "action": "Approve Directly", "next_state": "Approved", "allowed": "Sales Manager", "condition": "doc.grand_total <= 10000", "allow_self_approval": False},
+                            {"state": "Pending Manager Approval", "action": "Approve", "next_state": "Approved", "allowed": "Sales Manager", "condition": None, "allow_self_approval": False},
+                            {"state": "Pending Manager Approval", "action": "Reject", "next_state": "Rejected", "allowed": "Sales Manager", "condition": None, "allow_self_approval": False},
+                        ],
+                    },
+                )
+
+            return ConfigurationProposal(
+                intent="create_workflow",
+                target_doctype=doctype,
+                summary=f"Create approval workflow for {doctype} with Manager approval over 10000",
+                reasoning=f"User requested declarative workflow: '{user_prompt}'",
+                governance_tier=1,
+                workflow={
+                    "workflow_name": f"{doctype} Approval",
+                    "document_type": doctype,
+                    "is_active": True,
+                    "workflow_state_field": "workflow_state",
+                    "states": [
+                        {"state": "Draft", "doc_status": 0, "allow_edit": "Sales User", "style": "Inverse"},
+                        {"state": "Pending Manager Approval", "doc_status": 0, "allow_edit": "Sales Manager", "style": "Warning"},
+                        {"state": "Approved", "doc_status": 1, "allow_edit": "Sales Manager", "style": "Success"},
+                        {"state": "Rejected", "doc_status": 0, "allow_edit": "Sales Manager", "style": "Danger"},
+                    ],
+                    "transitions": [
+                        {
+                            "state": "Draft",
+                            "action": "Submit for Approval",
+                            "next_state": "Pending Manager Approval",
+                            "allowed": "Sales User",
+                            "condition": "doc.grand_total > 10000",
+                            "allow_self_approval": False,
+                        },
+                        {
+                            "state": "Draft",
+                            "action": "Approve Directly",
+                            "next_state": "Approved",
+                            "allowed": "Sales Manager",
+                            "condition": "doc.grand_total <= 10000",
+                            "allow_self_approval": False,
+                        },
+                        {
+                            "state": "Pending Manager Approval",
+                            "action": "Approve",
+                            "next_state": "Approved",
+                            "allowed": "Sales Manager",
+                            "condition": None,
+                            "allow_self_approval": False,
+                        },
+                        {
+                            "state": "Pending Manager Approval",
+                            "action": "Reject",
+                            "next_state": "Rejected",
+                            "allowed": "Sales Manager",
+                            "condition": None,
+                            "allow_self_approval": False,
+                        },
+                    ],
+                },
+            )
+
         # 1. Invariant Attack Handling (Tier 0 Protection & Zone 2 locked DocTypes)
-        is_attack_doctype = doctype in ZONE_2_LOCKED_DOCTYPES
         is_attack_action = any(
             w in prompt_lower
             for w in ("delete", "drop", "modify", "remove", "unlock", "relax", "bypass", "override")
@@ -749,4 +958,18 @@ class AIConfigurationPlanner:
                 )
             ],
             governance_tier=1,
+        )
+
+    def _generate_mock_proposal(
+        self,
+        doctype: str,
+        user_prompt: str,
+        feedback_history: List[str],
+        attempt: int,
+    ) -> ConfigurationProposal:
+        return self._mock_plan(
+            doctype=doctype,
+            user_prompt=user_prompt,
+            feedback_history=feedback_history,
+            attempt=attempt,
         )

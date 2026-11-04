@@ -48,6 +48,13 @@ from exrp.ai_control_plane.policy_enforcer import (
 
 from exrp.ai_control_plane.property_setter_engine import execute_property_setter_deployment
 from exrp.ai_control_plane.rollback_engine import execute_rollback
+from exrp.ai_control_plane.workflow_engine import (
+    WorkflowDefinition,
+    WorkflowStateModel,
+    WorkflowTransitionModel,
+    validate_workflow_state_machine,
+    execute_workflow_deployment,
+)
 
 AUTHORIZED_DEPLOYMENT_ROLES: Set[str] = {
     "System Manager",
@@ -120,7 +127,29 @@ def propose_configuration_change(
         proposal_payload = {}
 
     proposal_payload["target_doctype"] = doctype
-    proposal_payload["user_roles"] = user_roles
+    intent = proposal_payload.get("intent")
+    if intent in ("create_workflow", "workflow_action", "workflow"):
+        wf_data = proposal_payload.get("workflow_def") or proposal_payload.get("workflow") or proposal_payload
+        if isinstance(wf_data, dict):
+            wf_data = dict(wf_data)
+            if "document_type" not in wf_data or not wf_data["document_type"]:
+                wf_data["document_type"] = doctype
+        val_result = validate_workflow_state_machine(wf_data, existing_roles=user_roles)
+        return {
+            "status": "PROPOSED" if val_result.is_valid else "REJECTED",
+            "success": val_result.is_valid,
+            "proposal": proposal_payload,
+            "validation": {
+                "is_valid": val_result.is_valid,
+                "errors": val_result.errors,
+                "warnings": val_result.warnings,
+            },
+            "mermaid_graph": val_result.mermaid_graph,
+            "preview_fidelity_notice": (
+                "Workflow state machine previewed with Mermaid diagram. "
+                "Document transitions and permissions execute on active ERPNext records."
+            ),
+        }
 
     # Step 1: Policy & Invariant Evaluation
     validation_result = validate_mutation_safety(proposal_payload)
@@ -181,6 +210,8 @@ class FrappeDeploymentAdapter:
     _shared_property_setters: Dict[Tuple[str, Optional[str], str], Dict[str, Any]] = {}
     _shared_table_columns: Dict[str, List[ColumnDesc]] = {}
     _shared_revision_hashes: Dict[str, str] = {}
+    _shared_workflows: Dict[str, Dict[str, Any]] = {}
+    _shared_workflow_states: Dict[str, Dict[str, Any]] = {}
 
     @classmethod
     def reset_in_memory_state(cls) -> None:
@@ -192,6 +223,8 @@ class FrappeDeploymentAdapter:
         cls._shared_property_setters.clear()
         cls._shared_table_columns.clear()
         cls._shared_revision_hashes.clear()
+        cls._shared_workflows.clear()
+        cls._shared_workflow_states.clear()
 
     def __init__(
         self,
@@ -242,6 +275,8 @@ class FrappeDeploymentAdapter:
             self.property_setters = self._shared_property_setters
             self.table_columns = self._shared_table_columns
             self.revision_hashes = self._shared_revision_hashes
+            self.workflows = self._shared_workflows
+            self.workflow_states = self._shared_workflow_states
         else:
             self.locks = set()
             self.audit_journal = {}
@@ -250,6 +285,8 @@ class FrappeDeploymentAdapter:
             self.property_setters = {}
             self.table_columns = {}
             self.revision_hashes = {}
+            self.workflows = {}
+            self.workflow_states = {}
 
         if not self.in_memory:
             self._ensure_audit_table()
@@ -761,6 +798,99 @@ class FrappeDeploymentAdapter:
                     pass
             return None
 
+    def ensure_workflow_state(self, state_name: str, style: Optional[str] = None) -> None:
+        if self.in_memory:
+            self.workflow_states[state_name] = {
+                "name": state_name,
+                "workflow_state_name": state_name,
+                "style": style or "Primary",
+            }
+        else:
+            if hasattr(self._frappe, "db") and hasattr(self._frappe, "get_doc"):
+                if not self._frappe.db.exists("Workflow State", state_name):
+                    ws = self._frappe.get_doc({
+                        "doctype": "Workflow State",
+                        "workflow_state_name": state_name,
+                        "style": style or "Primary",
+                    })
+                    ws.insert(ignore_permissions=True)
+                    if hasattr(self._frappe.db, "commit"):
+                        self._frappe.db.commit()
+
+    def get_workflow_state(self, state_name: str) -> Optional[Dict[str, Any]]:
+        if self.in_memory:
+            return self.workflow_states.get(state_name)
+        if hasattr(self._frappe, "db") and hasattr(self._frappe.db, "get_value"):
+            try:
+                res = self._frappe.db.get_value(
+                    "Workflow State",
+                    state_name,
+                    ["name", "workflow_state_name", "style"],
+                    as_dict=True,
+                )
+                return res
+            except Exception:
+                return None
+        return None
+
+    def get_active_workflow(self, doctype: str) -> Optional[Dict[str, Any]]:
+        if self.in_memory:
+            for wf in self.workflows.values():
+                if wf.get("document_type") == doctype and wf.get("is_active") in (1, True):
+                    return dict(wf)
+            return None
+        if hasattr(self._frappe, "db") and hasattr(self._frappe.db, "get_value"):
+            try:
+                wf_name = self._frappe.db.get_value(
+                    "Workflow", {"document_type": doctype, "is_active": 1}, "name"
+                )
+                if wf_name:
+                    wf_doc = self._frappe.get_doc("Workflow", wf_name)
+                    return wf_doc.as_dict()
+            except Exception:
+                return None
+        return None
+
+    def get_workflow(self, workflow_name: str) -> Optional[Dict[str, Any]]:
+        if self.in_memory:
+            wf = self.workflows.get(workflow_name)
+            return dict(wf) if wf else None
+        if hasattr(self._frappe, "db") and hasattr(self._frappe, "get_doc"):
+            try:
+                if self._frappe.db.exists("Workflow", workflow_name):
+                    return self._frappe.get_doc("Workflow", workflow_name).as_dict()
+            except Exception:
+                return None
+        return None
+
+    def apply_workflow(self, doctype: str, workflow_data: Dict[str, Any]) -> None:
+        self.apply_called = True
+        wf_name = workflow_data.get("workflow_name")
+        if self.in_memory:
+            self.workflows[wf_name] = dict(workflow_data)
+        else:
+            if hasattr(self._frappe, "get_doc"):
+                if self._frappe.db.exists("Workflow", wf_name):
+                    w_doc = self._frappe.get_doc("Workflow", wf_name)
+                    w_doc.update(workflow_data)
+                    w_doc.is_active = 1
+                    w_doc.save(ignore_permissions=True)
+                else:
+                    w_doc = self._frappe.get_doc(workflow_data)
+                    w_doc.insert(ignore_permissions=True)
+                if hasattr(self._frappe.db, "commit"):
+                    self._frappe.db.commit()
+
+    def set_workflow_active(self, workflow_name: str, is_active: int) -> None:
+        if self.in_memory:
+            if workflow_name in self.workflows:
+                self.workflows[workflow_name]["is_active"] = is_active
+        else:
+            if hasattr(self._frappe, "db") and hasattr(self._frappe.db, "set_value"):
+                self._frappe.db.set_value("Workflow", workflow_name, "is_active", is_active)
+                if hasattr(self._frappe.db, "commit"):
+                    self._frappe.db.commit()
+
 
 
 def apply_configuration_change(
@@ -1061,6 +1191,129 @@ def apply_property_setter_change(
     return outcome
 
 
+def apply_workflow_change(
+    doctype: str,
+    deployment_id: Optional[str] = None,
+    workflow_def: Optional[Union[Dict[str, Any], str]] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    Whitelisted RPC endpoint for applying declarative Workflow definitions.
+    Adheres strictly to ADR-001 Rev 2.3 (§10, ADR-006):
+    - Strictly checks authorization: only System Manager, Finance Director, Operations Director.
+    - Validates state machine invariants, reachability, and deadlock absence.
+    - Captures baseline active workflow snapshot for safe rollback.
+    - Activates workflow and records durable audit trail.
+    """
+    start_time = time.perf_counter()
+
+    if not deployment_id:
+        deployment_id = kwargs.get("deployment_id") or f"dep_wf_{uuid.uuid4().hex[:12]}"
+
+    if workflow_def is None and "workflow" in kwargs:
+        workflow_def = kwargs.get("workflow")
+
+    if isinstance(workflow_def, str):
+        try:
+            workflow_def = json.loads(workflow_def)
+        except Exception as exc:
+            return {
+                "deployment_id": deployment_id,
+                "status": "REJECTED",
+                "success": False,
+                "stage": "VALIDATE",
+                "disposition": "INVALID_JSON_PAYLOAD",
+                "reason": f"Failed to parse workflow_def JSON: {exc}",
+                "doctype": doctype,
+                "execution_time_ms": round((time.perf_counter() - start_time) * 1000, 2),
+            }
+
+    if not workflow_def:
+        return {
+            "deployment_id": deployment_id,
+            "status": "REJECTED",
+            "success": False,
+            "stage": "VALIDATE",
+            "disposition": "MISSING_WORKFLOW_PAYLOAD",
+            "reason": "Missing workflow_def payload.",
+            "doctype": doctype,
+            "execution_time_ms": round((time.perf_counter() - start_time) * 1000, 2),
+        }
+
+    user_roles = kwargs.get("user_roles") or kwargs.get("caller_roles")
+    if user_roles is None:
+        user_roles = get_current_user_roles()
+
+    user_role_set = set(user_roles)
+    if not user_role_set.intersection(AUTHORIZED_DEPLOYMENT_ROLES):
+        execution_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        if kwargs.get("raise_on_unauthorized"):
+            if frappe and hasattr(frappe, "PermissionError"):
+                raise frappe.PermissionError(
+                    f"Unauthorized: User roles {sorted(user_role_set)} lack required deployment authority {sorted(AUTHORIZED_DEPLOYMENT_ROLES)}."
+                )
+            raise PermissionError(
+                f"Unauthorized: User roles {sorted(user_role_set)} lack required deployment authority {sorted(AUTHORIZED_DEPLOYMENT_ROLES)}."
+            )
+        return {
+            "deployment_id": deployment_id,
+            "status": "REJECTED",
+            "success": False,
+            "stage": "AUTHORIZATION",
+            "disposition": "UNAUTHORIZED_ROLE",
+            "reason": (
+                f"User does not possess any authorized deployment role. "
+                f"Required one of: {sorted(AUTHORIZED_DEPLOYMENT_ROLES)}. Found: {sorted(user_role_set)}"
+            ),
+            "doctype": doctype,
+            "execution_time_ms": execution_time_ms,
+        }
+
+    db = kwargs.get("adapter") or kwargs.get("db")
+    if db is None:
+        db = FrappeDeploymentAdapter()
+
+    site_id = (
+        getattr(getattr(frappe, "local", None), "site", None)
+        or kwargs.get("site")
+        or kwargs.get("site_id")
+        or "default"
+    )
+
+    forward_kwargs = dict(kwargs)
+    forward_kwargs.pop("user_roles", None)
+    forward_kwargs.pop("caller_roles", None)
+    forward_kwargs.pop("adapter", None)
+    forward_kwargs.pop("db", None)
+    forward_kwargs.pop("site", None)
+    forward_kwargs.pop("site_id", None)
+
+    try:
+        outcome = execute_workflow_deployment(
+            db=db,
+            deployment_id=deployment_id,
+            site_id=site_id,
+            doctype=doctype,
+            workflow_def=workflow_def,
+            user_roles=user_roles,
+            **forward_kwargs,
+        )
+    except Exception as exc:
+        execution_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        return {
+            "deployment_id": deployment_id,
+            "status": "FAILED_CLEAN",
+            "success": False,
+            "stage": "UNKNOWN",
+            "disposition": "UNEXPECTED_ERROR",
+            "reason": f"Workflow deployment execution raised unhandled exception: {exc}",
+            "doctype": doctype,
+            "execution_time_ms": execution_time_ms,
+        }
+
+    return outcome
+
+
 def revert_configuration_change(
     deployment_id: str,
     **kwargs: Any,
@@ -1099,6 +1352,7 @@ def revert_configuration_change(
 
 if frappe and hasattr(frappe, "whitelist"):
     apply_property_setter_change = frappe.whitelist()(apply_property_setter_change)
+    apply_workflow_change = frappe.whitelist()(apply_workflow_change)
     revert_configuration_change = frappe.whitelist()(revert_configuration_change)
 
 

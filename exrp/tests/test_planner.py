@@ -546,6 +546,174 @@ class TestAIConfigurationPlanner(unittest.TestCase):
                 self.assertEqual(planner.temperature, 0.5)
                 self.assertEqual(planner.max_retries, 4)
 
+    def test_14_conversational_workflow_planning_generates_valid_reachable_states(self):
+        """
+        Test 14: Verifies user prompt 'Set up a multi-stage approval workflow for Sales Order for high value orders'
+        generates a valid create_workflow proposal with reachable states conforming to ADR-001 Rev 2.3.
+        """
+        planner = AIConfigurationPlanner(mock_mode=True)
+        result = planner.plan_change(
+            doctype="Sales Order",
+            user_prompt="Set up a multi-stage approval workflow for Sales Order for high value orders",
+        )
+
+        self.assertTrue(result.success, f"Expected success but got: {result.error_message}")
+        self.assertIsNotNone(result.proposal)
+        self.assertEqual(result.proposal.intent, "create_workflow")
+        self.assertEqual(result.proposal.target_doctype, "Sales Order")
+        self.assertEqual(result.proposal.governance_tier, 1)
+
+        wf = result.proposal.workflow
+        self.assertIsNotNone(wf)
+        self.assertEqual(wf["document_type"], "Sales Order")
+        self.assertTrue(wf["is_active"])
+        self.assertEqual(wf["workflow_state_field"], "workflow_state")
+
+        # Verify states
+        state_names = [s["state"] for s in wf["states"]]
+        self.assertIn("Draft", state_names)
+        self.assertIn("Pending Manager Approval", state_names)
+        self.assertIn("Approved", state_names)
+        self.assertIn("Rejected", state_names)
+
+        # Verify initial state docstatus
+        draft_state = next(s for s in wf["states"] if s["state"] == "Draft")
+        self.assertEqual(draft_state["doc_status"], 0)
+        self.assertEqual(draft_state["allow_edit"], "Sales User")
+
+        # Verify approved terminal state docstatus
+        appr_state = next(s for s in wf["states"] if s["state"] == "Approved")
+        self.assertEqual(appr_state["doc_status"], 1)
+
+        # Verify transitions
+        trans_actions = [(t["state"], t["action"], t["next_state"]) for t in wf["transitions"]]
+        self.assertIn(("Draft", "Submit for Approval", "Pending Manager Approval"), trans_actions)
+        self.assertIn(("Draft", "Approve Directly", "Approved"), trans_actions)
+        self.assertIn(("Pending Manager Approval", "Approve", "Approved"), trans_actions)
+        self.assertIn(("Pending Manager Approval", "Reject", "Rejected"), trans_actions)
+
+        # Verify condition on high value orders
+        submit_trans = next(t for t in wf["transitions"] if t["action"] == "Submit for Approval")
+        self.assertEqual(submit_trans["condition"], "doc.grand_total > 10000")
+
+    def test_15_workflow_graph_validation_attaches_mermaid_syntax(self):
+        """
+        Test 15: Verifies that static graph analysis generates and attaches Mermaid diagram syntax
+        to PlannerResult.validation for visualization in Frappe Desk AI Sidecar.
+        """
+        planner = AIConfigurationPlanner(mock_mode=True)
+        result = planner.plan_change(
+            doctype="Sales Order",
+            user_prompt="Set up a multi-stage approval workflow for Sales Order for high value orders",
+        )
+
+        self.assertTrue(result.success)
+        self.assertIsNotNone(result.validation)
+        self.assertIn("mermaid_graph", result.validation)
+
+        mermaid = result.validation["mermaid_graph"]
+        self.assertTrue(mermaid.startswith("graph TD"), "Mermaid diagram must start with 'graph TD'")
+        self.assertIn('Draft["Draft (Draft)"]', mermaid)
+        self.assertIn('Approved["Approved (Submitted)"]', mermaid)
+        self.assertIn("-->", mermaid)
+        self.assertIn("Submit for Approval", mermaid)
+        self.assertIn("style Approved fill:#d4edda", mermaid)
+
+    def test_16_workflow_invariant_attack_on_tier0_gl_entry_rejected(self):
+        """
+        Test 16: Verifies that an invariant attack attempting to attach a workflow to Tier 0
+        DocType 'GL Entry' is rejected or refused cleanly without compromising enterprise invariants.
+        """
+        planner = AIConfigurationPlanner(mock_mode=True)
+        result = planner.plan_change(
+            doctype="GL Entry",
+            user_prompt="Set up a multi-stage approval workflow for GL Entry with Manager approval",
+            max_retries=2,
+        )
+
+        self.assertFalse(result.success, "Workflow attachment to Tier 0 GL Entry must be rejected.")
+        self.assertIsNotNone(result.error_message)
+        self.assertTrue(
+            "gl entry" in result.error_message.lower() or "tier 0" in result.error_message.lower(),
+            f"Error message must cite GL Entry or Tier 0: {result.error_message}"
+        )
+        self.assertGreaterEqual(len(result.feedback_history), 1)
+        self.assertIn("rejected", result.feedback_history[0].lower())
+
+    def test_17_workflow_self_correction_feedback_loop_on_unreachable_state(self):
+        """
+        Test 17: Verifies that proposing an invalid workflow state machine (e.g. unreachable state)
+        triggers the self-correction feedback loop and corrects to a valid state machine.
+        """
+        planner = AIConfigurationPlanner(mock_mode=True)
+        result = planner.plan_change(
+            doctype="Sales Order",
+            user_prompt="Set up an unreachable test_self_correction workflow for Sales Order",
+            max_retries=2,
+        )
+
+        self.assertTrue(result.success, "Should succeed after self-correcting on attempt 2")
+        self.assertEqual(result.attempts, 2)
+        self.assertEqual(len(result.feedback_history), 1)
+        self.assertIn("Your previous workflow proposal was rejected:", result.feedback_history[0])
+        self.assertIn("unreachable", result.feedback_history[0].lower())
+        self.assertIsNotNone(result.validation)
+        self.assertIn("mermaid_graph", result.validation)
+
+    def test_18_gemini_interactions_workflow_structured_generation(self):
+        """
+        Test 18: Verifies Google GenAI Interactions API client structured generation contract
+        when generating a create_workflow declarative proposal.
+        """
+        recorded_call = {}
+
+        class MockGeminiWorkflowInteractions:
+            def create(self, **kwargs):
+                recorded_call.update(kwargs)
+                mock_json_response = {
+                    "intent": "create_workflow",
+                    "target_doctype": "Sales Order",
+                    "summary": "Multi-stage Sales Order approval workflow",
+                    "reasoning": "Interactions API structured output test",
+                    "governance_tier": 1,
+                    "changes": [],
+                    "workflow": {
+                        "workflow_name": "Sales Order Approval",
+                        "document_type": "Sales Order",
+                        "is_active": True,
+                        "workflow_state_field": "workflow_state",
+                        "states": [
+                            {"state": "Draft", "doc_status": 0, "allow_edit": "Sales User", "style": "Inverse"},
+                            {"state": "Pending Approval", "doc_status": 0, "allow_edit": "Sales Manager", "style": "Warning"},
+                            {"state": "Approved", "doc_status": 1, "allow_edit": "Sales Manager", "style": "Success"},
+                            {"state": "Rejected", "doc_status": 0, "allow_edit": "Sales Manager", "style": "Danger"},
+                        ],
+                        "transitions": [
+                            {"state": "Draft", "action": "Submit for Approval", "next_state": "Pending Approval", "allowed": "Sales User"},
+                            {"state": "Pending Approval", "action": "Approve", "next_state": "Approved", "allowed": "Sales Manager"},
+                            {"state": "Pending Approval", "action": "Reject", "next_state": "Rejected", "allowed": "Sales Manager"},
+                        ],
+                    },
+                }
+                return types.SimpleNamespace(output_text=json.dumps(mock_json_response))
+
+        class MockGenAIClient:
+            def __init__(self):
+                self.interactions = MockGeminiWorkflowInteractions()
+
+        fake_client = MockGenAIClient()
+        planner = AIConfigurationPlanner(client=fake_client, model="gemini-3.8-flash")
+        result = planner.plan_change(
+            doctype="Sales Order",
+            user_prompt="Create approval workflow for Sales Order",
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(recorded_call["model"], "gemini-3.8-flash")
+        self.assertIn("create_workflow", recorded_call["input"])
+        self.assertIn("mermaid_graph", result.validation)
+        self.assertTrue(result.validation["mermaid_graph"].startswith("graph TD"))
+
 
 if __name__ == "__main__":
     unittest.main()
