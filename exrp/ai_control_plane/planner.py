@@ -135,11 +135,24 @@ class PlannerResult(BaseModel):
     feedback_history: List[str] = Field(default_factory=list)
 
 
+def _is_masked_password(val: Optional[str]) -> bool:
+    """
+    Returns True if val is None, empty, or a Frappe masked password placeholder
+    (consisting solely of '*' or '•' characters).
+    """
+    if not val or not isinstance(val, str):
+        return True
+    stripped = val.strip()
+    if not stripped:
+        return True
+    return all(ch in ("*", "•") for ch in stripped)
+
+
 def resolve_llm_config() -> Dict[str, Any]:
     """
     Resolves runtime LLM configuration adhering to ADR-001 Rev 2.3:
     1. Reads from Frappe Single DocType 'EXRP Settings' if Frappe runtime is available.
-    2. Uses settings.get_password("api_key") or settings.api_key if set.
+    2. Uses settings.get_password("api_key") or settings.api_key (if unmasked) if set.
     3. Falls back to os.environ.get("GEMINI_API_KEY") or os.environ.get("OPENAI_API_KEY").
     4. Checks settings.offline_mode or settings.llm_provider == 'Mock / Offline Test Mode'.
     """
@@ -171,22 +184,28 @@ def resolve_llm_config() -> Dict[str, Any]:
         # Resolve api_key via get_password if available
         if hasattr(settings_doc, "get_password") and callable(settings_doc.get_password):
             try:
-                api_key = settings_doc.get_password("api_key", raise_exception=False)
+                candidate = settings_doc.get_password("api_key", raise_exception=False)
+                if not _is_masked_password(candidate):
+                    api_key = candidate.strip()
             except Exception:
                 api_key = None
         if not api_key:
-            api_key = getattr(settings_doc, "api_key", None)
+            candidate = getattr(settings_doc, "api_key", None)
+            if not _is_masked_password(candidate):
+                api_key = candidate.strip()
 
     if not api_key:
-        api_key = settings_dict.get("api_key")
+        candidate = settings_dict.get("api_key")
+        if not _is_masked_password(candidate):
+            api_key = candidate.strip()
 
     # Fallback to environment variables
     if not api_key:
-        api_key = (
-            os.environ.get("GEMINI_API_KEY")
-            or os.environ.get("OPENAI_API_KEY")
-            or os.environ.get("ANTHROPIC_API_KEY")
-        )
+        for env_var in ("GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+            env_val = os.environ.get(env_var)
+            if not _is_masked_password(env_val):
+                api_key = env_val.strip()
+                break
 
     # Provider
     llm_provider = settings_dict.get("llm_provider") or getattr(settings_doc, "llm_provider", None)
@@ -290,7 +309,8 @@ class AIConfigurationPlanner:
         config = resolve_llm_config()
 
         self.model = model or config.get("model_name") or "gemini-3.8-flash"
-        self.api_key = api_key or config.get("api_key")
+        clean_passed_key = None if _is_masked_password(api_key) else api_key.strip()
+        self.api_key = clean_passed_key or config.get("api_key")
         self.temperature = temperature if temperature is not None else config.get("temperature", 0.2)
         self.max_retries = max_retries if max_retries is not None else config.get("max_retries", 2)
         self.provider = config.get("llm_provider", "Google Gemini")

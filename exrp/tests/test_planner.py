@@ -522,6 +522,18 @@ class TestAIConfigurationPlanner(unittest.TestCase):
             self.assertTrue(cfg["has_api_key"])
             self.assertNotIn("secret-super-key", json.dumps(cfg))
 
+            # Test 12.7: Masked password ('*****') from Frappe Password field falls back to decrypted key
+            with patch("google.genai.Client") as mock_client_cls:
+                mock_client = MagicMock()
+                mock_client_cls.return_value = mock_client
+                res_masked = test_llm_connection(
+                    provider="Google Gemini",
+                    api_key="*****************************************************",
+                    model_name="gemini-3.5-flash-lite",
+                )
+                self.assertTrue(res_masked["success"])
+                mock_client_cls.assert_called_with(api_key="secret-super-key")
+
     def test_13_planner_defaults_from_settings(self):
         """
         Test 13: Verifies AIConfigurationPlanner adopts resolved defaults

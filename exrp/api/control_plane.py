@@ -36,7 +36,7 @@ from exrp.ai_control_plane.schema_reconciler import (
     execute_single_field_deployment,
     make_bounded_lock_key,
 )
-from exrp.ai_control_plane.planner import AIConfigurationPlanner, resolve_llm_config
+from exrp.ai_control_plane.planner import AIConfigurationPlanner, resolve_llm_config, _is_masked_password
 from exrp.ai_control_plane.policy_enforcer import (
     PolicyType,
     RuntimePolicy,
@@ -1738,7 +1738,8 @@ def test_llm_connection(
     config = resolve_llm_config()
 
     eff_provider = provider or config.get("llm_provider") or "Google Gemini"
-    eff_api_key = api_key or config.get("api_key")
+    clean_api_key = None if _is_masked_password(api_key) else api_key.strip()
+    eff_api_key = clean_api_key or config.get("api_key")
     eff_model = model_name or config.get("model_name") or "gemini-3.8-flash"
     eff_base_url = api_base_url or config.get("api_base_url")
 
