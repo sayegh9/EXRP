@@ -73,7 +73,14 @@ class ConfigurationProposal(BaseModel):
     """
     model_config = ConfigDict(extra="allow")
 
-    intent: Literal["add_custom_fields", "set_property", "workflow_action", "create_workflow"] = Field(
+    intent: Literal[
+        "add_custom_fields",
+        "set_property",
+        "workflow_action",
+        "create_workflow",
+        "create_report",
+        "report",
+    ] = Field(
         ...,
         description="Declarative configuration intent"
     )
@@ -88,6 +95,10 @@ class ConfigurationProposal(BaseModel):
         default=None,
         description="Proposed WorkflowDefinition: workflow_name, document_type, is_active, workflow_state_field, states, transitions"
     )
+    report: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Proposed ReportDefinition: report_name, ref_doctype, columns, filters, sort_by, sort_order, chart, roles"
+    )
     governance_tier: int = Field(
         default=1,
         description="Governance Tier (0=Immutable Invariant, 1=Governed Policy, 2=Ordinary Config)"
@@ -96,6 +107,13 @@ class ConfigurationProposal(BaseModel):
     @field_validator("workflow", mode="before")
     @classmethod
     def normalize_workflow(cls, v: Any) -> Any:
+        if v is not None and hasattr(v, "model_dump"):
+            return v.model_dump()
+        return v
+
+    @field_validator("report", mode="before")
+    @classmethod
+    def normalize_report(cls, v: Any) -> Any:
         if v is not None and hasattr(v, "model_dump"):
             return v.model_dump()
         return v
@@ -436,6 +454,78 @@ class AIConfigurationPlanner:
                     "is_valid": True,
                 }
                 last_validation = validation_result
+            elif proposal.intent in ("create_report", "report"):
+                from exrp.ai_control_plane.report_engine import (
+                    validate_report_definition,
+                    get_report_preview_data,
+                    ReportDefinition,
+                )
+
+                if not proposal.report:
+                    errors = ["Missing report definition in proposal."]
+                    reason = f"Report validation failed: {', '.join(errors)}"
+                    last_error = reason
+                    feedback = (
+                        f"Your previous report proposal was rejected: {', '.join(errors)}. "
+                        "Correct the report columns and filter operators to satisfy enterprise safety."
+                    )
+                    feedback_history.append(feedback)
+                    if attempts > effective_max_retries:
+                        return PlannerResult(
+                            success=False,
+                            proposal=proposal,
+                            validation=None,
+                            ddl_plan=None,
+                            error_message=reason,
+                            attempts=attempts,
+                            feedback_history=feedback_history,
+                        )
+                    continue
+
+                if isinstance(proposal.report, dict) and not proposal.report.get("ref_doctype"):
+                    proposal.report["ref_doctype"] = doctype
+
+                rep_val = validate_report_definition(proposal.report)
+                if not rep_val.is_valid:
+                    reason = f"Report definition validation failed: {', '.join(rep_val.errors)}"
+                    last_error = reason
+                    feedback = (
+                        f"Your previous report proposal was rejected: {', '.join(rep_val.errors)}. "
+                        "Correct the report columns and filter operators to satisfy enterprise safety."
+                    )
+                    feedback_history.append(feedback)
+                    if attempts > effective_max_retries:
+                        return PlannerResult(
+                            success=False,
+                            proposal=proposal,
+                            validation={
+                                "is_valid": False,
+                                "errors": rep_val.errors,
+                                "warnings": getattr(rep_val, "warnings", []),
+                            },
+                            ddl_plan=None,
+                            error_message=reason,
+                            attempts=attempts,
+                            feedback_history=feedback_history,
+                        )
+                    continue
+
+                preview_data = getattr(rep_val, "preview_data", None)
+                if preview_data is None:
+                    try:
+                        preview_data = get_report_preview_data(proposal.report)
+                    except Exception:
+                        preview_data = []
+
+                validation_result = {
+                    "status": "approved",
+                    "storage_impact": "METADATA_ONLY",
+                    "governance_tier": "TIER_1_GOVERNED_POLICY",
+                    "preview_data": preview_data,
+                    "warnings": getattr(rep_val, "warnings", []),
+                    "is_valid": True,
+                }
+                last_validation = validation_result
             else:
                 proposal_dict = proposal.model_dump()
                 proposal_dict["target_doctype"] = doctype
@@ -591,6 +681,17 @@ class AIConfigurationPlanner:
             "   - All states must be reachable from initial state (no orphaned states).\n"
             "   - All non-terminal states must have outgoing transitions (no deadlock states).\n"
             "   - Workflows are strictly PROHIBITED on Tier 0 locked DocTypes (e.g. GL Entry, User, Role).\n"
+            "9. For 'create_report' or 'report':\n"
+            "   - Set intent to 'create_report' and populate 'report' field adhering to ReportDefinition.\n"
+            "   - report_name: Human readable title for the report (e.g., '{doctype} High-Value Pending Report').\n"
+            "   - ref_doctype: Target DocType being queried.\n"
+            "   - columns: List of column specifications with 'fieldname', 'label', and optional 'fieldtype'. Must be valid fields on the DocType.\n"
+            "   - filters: List of filter specifications with 'fieldname', 'operator', 'value'.\n"
+            "   - Allowed filter operators: '=', '!=', '>', '<', '>=', '<=', 'like', 'not like', 'in', 'not in', 'between', 'is'. Raw SQL, arbitrary expressions, and subqueries are strictly PROHIBITED.\n"
+            "   - sort_by: Fieldname to sort by.\n"
+            "   - sort_order: 'asc' or 'desc'.\n"
+            "   - chart: Optional chart config with 'chart_type' ('Bar', 'Line', 'Pie', 'Donut', 'Percentage'), 'x_field', 'y_fields'.\n"
+            "   - Reports are strictly PROHIBITED on system internal / Tier 0 locked DocTypes (e.g. User, Role, DocType, Custom Field, Property Setter, Workflow, GL Entry).\n"
         )
 
         user_content = (
@@ -788,6 +889,106 @@ class AIConfigurationPlanner:
                             "allow_self_approval": False,
                         },
                     ],
+                },
+            )
+
+        # Report detection keywords
+        report_keywords = (
+            "report",
+            "filter",
+            "show all",
+            "list of",
+            "dashboard",
+            "analytics",
+            "table of",
+        )
+        is_report = any(kw in prompt_lower for kw in report_keywords)
+
+        if is_report:
+            if is_attack_doctype or doctype in ("User", "Role", "DocType", "Custom Field", "Property Setter", "Workflow", "GL Entry"):
+                return ConfigurationProposal(
+                    intent="create_report",
+                    target_doctype=doctype,
+                    summary=f"Attempted report on protected DocType {doctype}",
+                    reasoning=f"Mock generator simulated report on Tier 0 locked DocType {doctype}",
+                    governance_tier=0,
+                    report={
+                        "report_name": f"{doctype} Activity Report",
+                        "ref_doctype": doctype,
+                        "columns": [
+                            {"fieldname": "name", "label": "ID"},
+                            {"fieldname": "email" if doctype == "User" else "title", "label": "Email" if doctype == "User" else "Title"},
+                        ],
+                        "filters": [],
+                        "sort_by": "modified",
+                        "sort_order": "desc",
+                        "chart": None,
+                        "roles": ["All"],
+                    },
+                )
+
+            has_report_feedback = any(
+                "report" in fb.lower() or "operator" in fb.lower() or "rejected" in fb.lower()
+                for fb in feedback_history
+            )
+            if ("invalid_operator" in prompt_lower or "test_self_correction" in prompt_lower) and not has_report_feedback and attempt == 1:
+                return ConfigurationProposal(
+                    intent="create_report",
+                    target_doctype=doctype,
+                    summary=f"Create report for {doctype} (initial attempt with invalid operator)",
+                    reasoning="Simulating invalid filter operator to test self-correction feedback loop",
+                    governance_tier=1,
+                    report={
+                        "report_name": f"{doctype} High-Value Pending Report",
+                        "ref_doctype": doctype,
+                        "columns": [
+                            {"fieldname": "name", "label": "ID"},
+                            {"fieldname": "customer", "label": "Customer"},
+                            {"fieldname": "status", "label": "Status"},
+                            {"fieldname": "grand_total", "label": "Grand Total"},
+                        ],
+                        "filters": [
+                            {"fieldname": "status", "operator": "INVALID_SQL_OP", "value": "Pending"},
+                            {"fieldname": "grand_total", "operator": ">", "value": 25000},
+                        ],
+                        "sort_by": "grand_total",
+                        "sort_order": "desc",
+                        "chart": {
+                            "chart_type": "Bar",
+                            "x_field": "customer",
+                            "y_fields": ["grand_total"],
+                        },
+                        "roles": ["All"],
+                    },
+                )
+
+            return ConfigurationProposal(
+                intent="create_report",
+                target_doctype=doctype,
+                summary=f"Create high-value pending report for {doctype}",
+                reasoning=f"User requested declarative report: '{user_prompt}'",
+                governance_tier=1,
+                report={
+                    "report_name": f"{doctype} High-Value Pending Report",
+                    "ref_doctype": doctype,
+                    "columns": [
+                        {"fieldname": "name", "label": "ID"},
+                        {"fieldname": "customer", "label": "Customer"},
+                        {"fieldname": "status", "label": "Status"},
+                        {"fieldname": "grand_total", "label": "Grand Total"},
+                    ],
+                    "filters": [
+                        {"fieldname": "status", "operator": "=", "value": "Pending"},
+                        {"fieldname": "grand_total", "operator": ">", "value": 25000},
+                    ],
+                    "sort_by": "grand_total",
+                    "sort_order": "desc",
+                    "chart": {
+                        "chart_type": "Bar",
+                        "x_field": "customer",
+                        "y_fields": ["grand_total"],
+                    },
+                    "roles": ["All"],
                 },
             )
 

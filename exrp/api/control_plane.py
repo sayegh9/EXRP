@@ -55,11 +55,34 @@ from exrp.ai_control_plane.workflow_engine import (
     validate_workflow_state_machine,
     execute_workflow_deployment,
 )
+from exrp.ai_control_plane.report_engine import (
+    ReportColumn,
+    ReportFilter,
+    ReportChartConfig,
+    ReportDefinition,
+    ReportValidationResult,
+    validate_report_definition,
+    get_report_preview_data,
+    execute_report_deployment,
+    AUTHORIZED_REPORT_ROLES,
+)
+from exrp.ai_control_plane.cross_doc_policy import (
+    CrossDocPolicy,
+    CrossDocPolicyCatalog,
+    cross_doc_catalog,
+)
 
 AUTHORIZED_DEPLOYMENT_ROLES: Set[str] = {
     "System Manager",
     "Finance Director",
     "Operations Director",
+}
+
+AUTHORIZED_REPORT_DEPLOYMENT_ROLES: Set[str] = {
+    "System Manager",
+    "Finance Director",
+    "Operations Director",
+    "Sales Manager",
 }
 
 
@@ -151,6 +174,38 @@ def propose_configuration_change(
             ),
         }
 
+    if intent in ("create_report", "report", "report_builder"):
+        rep_data = proposal_payload.get("report_def") or proposal_payload.get("report") or proposal_payload
+        if isinstance(rep_data, dict):
+            rep_data = dict(rep_data)
+            if "ref_doctype" not in rep_data or not rep_data["ref_doctype"]:
+                rep_data["ref_doctype"] = doctype
+            if "report_name" not in rep_data or not rep_data["report_name"]:
+                rep_data["report_name"] = f"{doctype} Custom Report"
+        adapter = kwargs.get("adapter") or kwargs.get("db")
+        val_result = validate_report_definition(rep_data, db=adapter)
+        preview_data = None
+        if val_result.is_valid:
+            preview_data = get_report_preview_data(rep_data, db=adapter)
+            val_result.preview_data = preview_data
+
+        return {
+            "status": "PROPOSED" if val_result.is_valid else "REJECTED",
+            "success": val_result.is_valid,
+            "proposal": proposal_payload,
+            "validation": {
+                "is_valid": val_result.is_valid,
+                "errors": val_result.errors,
+                "warnings": val_result.warnings,
+                "preview_data": preview_data,
+            },
+            "preview_data": preview_data,
+            "preview_fidelity_notice": (
+                "Report Builder configuration previewed with sample query results. "
+                "Production data and role-based permissions apply when viewing in Desk."
+            ),
+        }
+
     # Step 1: Policy & Invariant Evaluation
     validation_result = validate_mutation_safety(proposal_payload)
 
@@ -212,6 +267,8 @@ class FrappeDeploymentAdapter:
     _shared_revision_hashes: Dict[str, str] = {}
     _shared_workflows: Dict[str, Dict[str, Any]] = {}
     _shared_workflow_states: Dict[str, Dict[str, Any]] = {}
+    _shared_reports: Dict[str, Dict[str, Any]] = {}
+    _shared_documents: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
     @classmethod
     def reset_in_memory_state(cls) -> None:
@@ -225,6 +282,8 @@ class FrappeDeploymentAdapter:
         cls._shared_revision_hashes.clear()
         cls._shared_workflows.clear()
         cls._shared_workflow_states.clear()
+        cls._shared_reports.clear()
+        cls._shared_documents.clear()
 
     def __init__(
         self,
@@ -277,6 +336,8 @@ class FrappeDeploymentAdapter:
             self.revision_hashes = self._shared_revision_hashes
             self.workflows = self._shared_workflows
             self.workflow_states = self._shared_workflow_states
+            self.reports = self._shared_reports
+            self.documents = self._shared_documents
         else:
             self.locks = set()
             self.audit_journal = {}
@@ -287,6 +348,8 @@ class FrappeDeploymentAdapter:
             self.revision_hashes = {}
             self.workflows = {}
             self.workflow_states = {}
+            self.reports = {}
+            self.documents = {}
 
         if not self.in_memory:
             self._ensure_audit_table()
@@ -891,6 +954,73 @@ class FrappeDeploymentAdapter:
                 if hasattr(self._frappe.db, "commit"):
                     self._frappe.db.commit()
 
+    def get_report(self, report_name: str) -> Optional[Dict[str, Any]]:
+        if self.in_memory:
+            rep = self.reports.get(report_name)
+            return dict(rep) if rep else None
+        if hasattr(self._frappe, "db") and hasattr(self._frappe, "get_doc"):
+            try:
+                if self._frappe.db.exists("Report", report_name):
+                    return self._frappe.get_doc("Report", report_name).as_dict()
+            except Exception:
+                return None
+        return None
+
+    def apply_report(self, report_name: str, report_doc: Dict[str, Any]) -> None:
+        self.apply_called = True
+        if self.in_memory:
+            self.reports[report_name] = dict(report_doc)
+        else:
+            if hasattr(self._frappe, "get_doc"):
+                if self._frappe.db.exists("Report", report_name):
+                    r_doc = self._frappe.get_doc("Report", report_name)
+                    r_doc.update(report_doc)
+                    r_doc.save(ignore_permissions=True)
+                else:
+                    r_doc = self._frappe.get_doc(report_doc)
+                    r_doc.insert(ignore_permissions=True)
+                if hasattr(self._frappe.db, "commit"):
+                    self._frappe.db.commit()
+
+    def set_report_disabled(self, report_name: str, disabled: int = 1) -> None:
+        if self.in_memory:
+            if report_name in self.reports:
+                self.reports[report_name]["disabled"] = disabled
+        else:
+            if hasattr(self._frappe, "db") and hasattr(self._frappe.db, "set_value"):
+                self._frappe.db.set_value("Report", report_name, "disabled", disabled)
+                if hasattr(self._frappe.db, "commit"):
+                    self._frappe.db.commit()
+
+    def get_document(self, doctype: str, name: str) -> Optional[Dict[str, Any]]:
+        if self.in_memory:
+            doc = self.documents.get((doctype, name))
+            return dict(doc) if doc else None
+        if hasattr(self._frappe, "db") and hasattr(self._frappe, "get_doc"):
+            try:
+                if self._frappe.db.exists(doctype, name):
+                    return self._frappe.get_doc(doctype, name).as_dict()
+            except Exception:
+                return None
+        return None
+
+    def set_document(self, doctype: str, name: str, doc_data: Dict[str, Any]) -> None:
+        if self.in_memory:
+            self.documents[(doctype, name)] = dict(doc_data)
+        else:
+            if hasattr(self._frappe, "get_doc"):
+                if self._frappe.db.exists(doctype, name):
+                    doc = self._frappe.get_doc(doctype, name)
+                    doc.update(doc_data)
+                    doc.save(ignore_permissions=True)
+                else:
+                    doc_dict = dict(doc_data)
+                    doc_dict["doctype"] = doctype
+                    doc = self._frappe.get_doc(doc_dict)
+                    doc.insert(ignore_permissions=True)
+                if hasattr(self._frappe.db, "commit"):
+                    self._frappe.db.commit()
+
 
 
 def apply_configuration_change(
@@ -1314,6 +1444,130 @@ def apply_workflow_change(
     return outcome
 
 
+def apply_report_change(
+    doctype: str,
+    deployment_id: Optional[str] = None,
+    report_def: Optional[Union[Dict[str, Any], str]] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    Whitelisted RPC endpoint for deploying declarative Report Builder definitions.
+    Adheres strictly to PRD-001 and ADR-001 / ADR-006:
+    - Role checks: System Manager, Finance Director, Operations Director, Sales Manager.
+    - Validates report definition, columns, filters, and operators.
+    - Captures baseline snapshot for 1-click rollback.
+    - Creates or updates native Frappe Report document.
+    - Durable audit trail in tabEXRP Deployment Audit.
+    """
+    start_time = time.perf_counter()
+
+    if not deployment_id:
+        deployment_id = kwargs.get("deployment_id") or f"dep_rep_{uuid.uuid4().hex[:12]}"
+
+    if report_def is None and "report" in kwargs:
+        report_def = kwargs.get("report")
+
+    if isinstance(report_def, str):
+        try:
+            report_def = json.loads(report_def)
+        except Exception as exc:
+            return {
+                "deployment_id": deployment_id,
+                "status": "REJECTED",
+                "success": False,
+                "stage": "VALIDATE",
+                "disposition": "INVALID_JSON_PAYLOAD",
+                "reason": f"Failed to parse report_def JSON: {exc}",
+                "doctype": doctype,
+                "execution_time_ms": round((time.perf_counter() - start_time) * 1000, 2),
+            }
+
+    if not report_def:
+        return {
+            "deployment_id": deployment_id,
+            "status": "REJECTED",
+            "success": False,
+            "stage": "VALIDATE",
+            "disposition": "MISSING_REPORT_PAYLOAD",
+            "reason": "Missing report_def payload.",
+            "doctype": doctype,
+            "execution_time_ms": round((time.perf_counter() - start_time) * 1000, 2),
+        }
+
+    user_roles = kwargs.get("user_roles") or kwargs.get("caller_roles")
+    if user_roles is None:
+        user_roles = get_current_user_roles()
+
+    user_role_set = set(user_roles)
+    if not user_role_set.intersection(AUTHORIZED_REPORT_DEPLOYMENT_ROLES):
+        execution_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        if kwargs.get("raise_on_unauthorized"):
+            if frappe and hasattr(frappe, "PermissionError"):
+                raise frappe.PermissionError(
+                    f"Unauthorized: User roles {sorted(user_role_set)} lack required report deployment authority {sorted(AUTHORIZED_REPORT_DEPLOYMENT_ROLES)}."
+                )
+            raise PermissionError(
+                f"Unauthorized: User roles {sorted(user_role_set)} lack required report deployment authority {sorted(AUTHORIZED_REPORT_DEPLOYMENT_ROLES)}."
+            )
+        return {
+            "deployment_id": deployment_id,
+            "status": "REJECTED",
+            "success": False,
+            "stage": "AUTHORIZATION",
+            "disposition": "UNAUTHORIZED_ROLE",
+            "reason": (
+                f"User does not possess any authorized report deployment role. "
+                f"Required one of: {sorted(AUTHORIZED_REPORT_DEPLOYMENT_ROLES)}. Found: {sorted(user_role_set)}"
+            ),
+            "doctype": doctype,
+            "execution_time_ms": execution_time_ms,
+        }
+
+    db = kwargs.get("adapter") or kwargs.get("db")
+    if db is None:
+        db = FrappeDeploymentAdapter()
+
+    site_id = (
+        getattr(getattr(frappe, "local", None), "site", None)
+        or kwargs.get("site")
+        or kwargs.get("site_id")
+        or "default"
+    )
+
+    forward_kwargs = dict(kwargs)
+    forward_kwargs.pop("user_roles", None)
+    forward_kwargs.pop("caller_roles", None)
+    forward_kwargs.pop("adapter", None)
+    forward_kwargs.pop("db", None)
+    forward_kwargs.pop("site", None)
+    forward_kwargs.pop("site_id", None)
+
+    try:
+        outcome = execute_report_deployment(
+            db=db,
+            deployment_id=deployment_id,
+            site_id=site_id,
+            doctype=doctype,
+            report_def=report_def,
+            user_roles=user_roles,
+            **forward_kwargs,
+        )
+    except Exception as exc:
+        execution_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        return {
+            "deployment_id": deployment_id,
+            "status": "FAILED_CLEAN",
+            "success": False,
+            "stage": "UNKNOWN",
+            "disposition": "UNEXPECTED_ERROR",
+            "reason": f"Report deployment execution raised unhandled exception: {exc}",
+            "doctype": doctype,
+            "execution_time_ms": execution_time_ms,
+        }
+
+    return outcome
+
+
 def revert_configuration_change(
     deployment_id: str,
     **kwargs: Any,
@@ -1353,6 +1607,7 @@ def revert_configuration_change(
 if frappe and hasattr(frappe, "whitelist"):
     apply_property_setter_change = frappe.whitelist()(apply_property_setter_change)
     apply_workflow_change = frappe.whitelist()(apply_workflow_change)
+    apply_report_change = frappe.whitelist()(apply_report_change)
     revert_configuration_change = frappe.whitelist()(revert_configuration_change)
 
 
