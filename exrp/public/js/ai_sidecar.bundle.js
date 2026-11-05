@@ -161,15 +161,35 @@
             <span class="exrp-context-indicator" id="exrp-context-indicator"></span>
             <span id="exrp-context-doctype-text" style="display: none;">Sales Order</span>
             <select id="exrp-target-doctype-select" title="Select target DocType to customize" style="font-size: 12px; font-weight: 600; padding: 2px 6px; border-radius: 5px; border: 1px solid var(--border-color, #d1d5db); background: var(--control-bg, #f9fafb); color: var(--text-color, #111827); cursor: pointer;">
-              <option value="Sales Order">Sales Order</option>
-              <option value="Customer">Customer</option>
-              <option value="Delivery Note">Delivery Note</option>
-              <option value="Quotation">Quotation</option>
-              <option value="Item">Item</option>
-              <option value="ToDo">ToDo</option>
-              <option value="Note">Note</option>
-              <option value="Contact">Contact</option>
-              <option value="Address">Address</option>
+              <optgroup label="Selling & CRM">
+                <option value="Sales Order">Sales Order</option>
+                <option value="Quotation">Quotation</option>
+                <option value="Delivery Note">Delivery Note</option>
+                <option value="Customer">Customer</option>
+                <option value="Opportunity">Opportunity</option>
+                <option value="Lead">Lead</option>
+              </optgroup>
+              <optgroup label="Buying & Procurement">
+                <option value="Purchase Order">Purchase Order</option>
+                <option value="Material Request">Material Request</option>
+                <option value="Purchase Receipt">Purchase Receipt</option>
+                <option value="Supplier">Supplier</option>
+              </optgroup>
+              <optgroup label="Inventory & Warehouse">
+                <option value="Item">Item</option>
+                <option value="Warehouse">Warehouse</option>
+                <option value="Stock Ledger Entry">Stock Ledger Entry (Tier 0)</option>
+              </optgroup>
+              <optgroup label="Finance & Accounting">
+                <option value="Payment Entry">Payment Entry</option>
+                <option value="Sales Invoice">Sales Invoice (Tier 0)</option>
+                <option value="GL Entry">GL Entry (Tier 0)</option>
+              </optgroup>
+              <optgroup label="HR & Projects">
+                <option value="Expense Claim">Expense Claim</option>
+                <option value="Project">Project</option>
+                <option value="Employee">Employee</option>
+              </optgroup>
             </select>
             <button type="button" id="exrp-btn-open-target-doctype" title="Open selected DocType in Desk" style="font-size: 10.5px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border-color, #d1d5db); background: transparent; color: var(--primary, #2563eb); cursor: pointer; font-weight: 500;">Open ↗</button>
           </div>
