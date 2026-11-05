@@ -74,7 +74,12 @@ body.dark,
    EXRP Official Brand Identity & Logo Styles
    ========================================================================== */
 .navbar-brand .app-logo,
-.navbar .app-logo {
+.navbar .app-logo,
+img.app-logo,
+.navbar-home img,
+.navbar-brand img,
+.page-card-head img,
+.footer-logo-extension img {
   height: 28px !important;
   width: auto !important;
   max-width: 140px !important;
@@ -84,32 +89,39 @@ body.dark,
   transition: opacity 0.2s ease;
 }
 
+/* Light theme explicit logo (Pine green wordmark + Mint bubble) */
+[data-theme="light"] .navbar-brand .app-logo,
+[data-theme="light"] .navbar .app-logo,
+[data-theme="light"] img.app-logo,
+[data-theme="light"] .navbar-home img,
+[data-theme="light"] .navbar-brand img,
+[data-theme-mode="light"] .navbar-brand .app-logo,
+[data-theme-mode="light"] .navbar .app-logo,
+[data-theme-mode="light"] img.app-logo,
+[data-theme-mode="light"] .navbar-home img,
+[data-theme-mode="light"] .navbar-brand img,
+:root:not([data-theme="dark"]):not([data-theme-mode="dark"]) .navbar .app-logo,
+:root:not([data-theme="dark"]):not([data-theme-mode="dark"]) .navbar-brand img {
+  content: url("/assets/exrp/images/exrp-logo.svg") !important;
+}
+
+/* Dark theme explicit logo (White wordmark + Mint bubble from user-provided artwork) */
 [data-theme="dark"] .navbar-brand .app-logo,
 [data-theme="dark"] .navbar .app-logo,
 [data-theme="dark"] img.app-logo,
 [data-theme="dark"] .navbar-home img,
+[data-theme="dark"] .navbar-brand img,
 [data-theme-mode="dark"] .navbar-brand .app-logo,
 [data-theme-mode="dark"] .navbar .app-logo,
 [data-theme-mode="dark"] img.app-logo,
 [data-theme-mode="dark"] .navbar-home img,
+[data-theme-mode="dark"] .navbar-brand img,
 body.dark .navbar-brand .app-logo,
 body.dark .navbar .app-logo,
 body.dark img.app-logo,
-body.dark .navbar-home img {
+body.dark .navbar-home img,
+body.dark .navbar-brand img {
   content: url("/assets/exrp/images/exrp-logo-dark.png") !important;
-  object-position: -99999px 50% !important;
-  background-image: url("/assets/exrp/images/exrp-logo-dark.png") !important;
-  background-repeat: no-repeat !important;
-  background-position: left center !important;
-  background-size: contain !important;
-  min-width: 108px !important;
-  height: 28px !important;
-  display: inline-block !important;
-}
-
-[data-theme="light"] .navbar .app-logo,
-:root:not([data-theme="dark"]):not([data-theme-mode="dark"]) .navbar .app-logo {
-  content: url("/assets/exrp/images/exrp-logo.svg") !important;
 }
 
 /* Desk Navbar Quick Theme Toggle Button */

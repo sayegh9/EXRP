@@ -10,22 +10,22 @@ app_description = "AI-Native Configuration Control Plane for Frappe/ERPNext"
 app_email = "developers@exrp.local"
 app_license = "MIT"
 
-# Desk assets: Injects the EXRP AI Sidecar into Frappe Desk
+# Desk assets: Injects the EXRP AI Sidecar into Frappe Desk (cache-busted)
 app_include_js = [
-    "/assets/exrp/js/ai_sidecar.bundle.js"
+    "/assets/exrp/js/ai_sidecar.bundle.js?v=2.2.0"
 ]
 
 app_include_css = [
-    "/assets/exrp/css/ai_sidecar.css"
+    "/assets/exrp/css/ai_sidecar.css?v=2.2.0"
 ]
 
 # Web / Portal assets (Ensures brand styles and theme persistence on portal pages)
 web_include_js = [
-    "/assets/exrp/js/ai_sidecar.bundle.js"
+    "/assets/exrp/js/ai_sidecar.bundle.js?v=2.2.0"
 ]
 
 web_include_css = [
-    "/assets/exrp/css/ai_sidecar.css"
+    "/assets/exrp/css/ai_sidecar.css?v=2.2.0"
 ]
 
 # Route root '/' directly to ERP Desk for authenticated users

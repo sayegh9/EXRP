@@ -548,10 +548,10 @@
      */
     setupNavbarThemeToggle() {
       // Find the action bar navbar-nav on the right
-      const navbarNav = (
+      const userDropdown = document.querySelector('.dropdown-navbar-user');
+      const navbarNav = userDropdown ? userDropdown.closest('ul') : (
         document.querySelector('.collapse.navbar-collapse .navbar-nav') ||
         document.querySelector('.navbar-collapse ul.navbar-nav') ||
-        document.querySelector('.dropdown-navbar-user')?.closest('ul') ||
         document.querySelector('.dropdown-help')?.closest('ul') ||
         document.querySelectorAll('header .navbar ul.navbar-nav')[1]
       );
@@ -576,11 +576,15 @@
       `;
 
       // Insert before user dropdown or help dropdown if present
-      const userDropdown = navbarNav.querySelector('.dropdown-navbar-user') || navbarNav.querySelector('.dropdown-help');
-      if (userDropdown) {
+      if (userDropdown && userDropdown.parentElement === navbarNav) {
         navbarNav.insertBefore(li, userDropdown);
       } else {
-        navbarNav.appendChild(li);
+        const helpDropdown = navbarNav.querySelector('.dropdown-help');
+        if (helpDropdown) {
+          navbarNav.insertBefore(li, helpDropdown);
+        } else {
+          navbarNav.appendChild(li);
+        }
       }
 
       const btn = li.querySelector('#exrp-theme-toggle-btn');
@@ -674,7 +678,9 @@
       const isDark = this.isDarkModeActive();
       const targetLogo = isDark ? '/assets/exrp/images/exrp-logo-dark.png' : '/assets/exrp/images/exrp-logo.svg';
 
-      const logoImgs = document.querySelectorAll('.navbar .app-logo, .navbar-brand .app-logo, img.app-logo, .navbar-home img');
+      const logoImgs = document.querySelectorAll(
+        '.navbar .app-logo, .navbar-brand .app-logo, img.app-logo, .navbar-home img, .navbar-brand img, .page-card-head img, .footer-logo-extension img'
+      );
       logoImgs.forEach(img => {
         if (img.getAttribute('src') !== targetLogo) {
           img.setAttribute('src', targetLogo);
