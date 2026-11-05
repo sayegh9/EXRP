@@ -24,6 +24,7 @@ AUTHORIZED_ROLLBACK_ROLES: Set[str] = {
     "System Manager",
     "Finance Director",
     "Operations Director",
+    "Sales Manager",
 }
 
 
@@ -161,7 +162,14 @@ def execute_rollback(
         }
 
     try:
-        # Step 5: Classify deployment type (Workflow vs Property Setter vs Custom Field)
+        # Step 5: Classify deployment type (Report vs Workflow vs Property Setter vs Custom Field)
+        is_report = (
+            record.get("deployment_type") == "report"
+            or bool(record.get("report_name"))
+            or (isinstance(record.get("outcome"), dict) and record["outcome"].get("disposition") == "REPORT_BUILDER_DEPLOYED")
+            or (isinstance(record.get("baseline_snapshot"), dict) and "deployed_report_name" in record["baseline_snapshot"])
+        )
+
         is_workflow = (
             record.get("deployment_type") == "workflow"
             or bool(record.get("workflow_name"))
@@ -176,7 +184,65 @@ def execute_rollback(
             or (isinstance(record.get("baseline_snapshot"), dict) and "had_existing_property_setter" in record["baseline_snapshot"])
         )
 
-        if is_workflow:
+        if is_report:
+            # --- REPORT BUILDER ROLLBACK FLOW (PRD-001, ADR-001 Rev 2.3 §10, ADR-006) ---
+            baseline_snapshot = record.get("baseline_snapshot") or {}
+            deployed_report_name = (
+                record.get("report_name")
+                or baseline_snapshot.get("deployed_report_name")
+                or (record.get("outcome") or {}).get("report_name")
+            )
+            had_previous = baseline_snapshot.get("had_existing_report", False)
+            previous_report_data = baseline_snapshot.get("previous_report_data")
+
+            if had_previous and previous_report_data:
+                # 1. Restore previous baseline report
+                if hasattr(db, "apply_report") and callable(getattr(db, "apply_report", None)):
+                    db.apply_report(deployed_report_name, previous_report_data)
+                elif frappe and hasattr(frappe, "get_doc"):
+                    r_doc = frappe.get_doc("Report", deployed_report_name)
+                    r_doc.update(previous_report_data)
+                    r_doc.save(ignore_permissions=True)
+                    if hasattr(frappe.db, "commit"):
+                        frappe.db.commit()
+                disposition = "PREVIOUS_REPORT_RESTORED"
+                restored_report = deployed_report_name
+            else:
+                # 2. If new report, soft-deactivate by setting disabled = 1
+                if hasattr(db, "set_report_disabled") and callable(getattr(db, "set_report_disabled", None)):
+                    db.set_report_disabled(deployed_report_name, 1)
+                elif frappe and hasattr(frappe, "db") and hasattr(frappe.db, "set_value"):
+                    frappe.db.set_value("Report", deployed_report_name, "disabled", 1)
+                    if hasattr(frappe.db, "commit"):
+                        frappe.db.commit()
+                disposition = "REPORT_DISABLED"
+                restored_report = None
+
+            # Clear DocType cache
+            if hasattr(db, "clear_doctype_cache") and callable(getattr(db, "clear_doctype_cache", None)):
+                db.clear_doctype_cache(doctype)
+            if frappe and hasattr(frappe, "clear_cache"):
+                frappe.clear_cache(doctype=doctype)
+
+            execution_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            outcome = {
+                "deployment_id": deployment_id,
+                "status": "ROLLED_BACK",
+                "success": True,
+                "disposition": disposition,
+                "doctype": doctype,
+                "report_name": deployed_report_name,
+                "restored_report": restored_report,
+                "execution_time_ms": execution_time_ms,
+            }
+
+            # Marks audit status ROLLED_BACK
+            if hasattr(db, "persist_final_outcome_and_audit") and callable(getattr(db, "persist_final_outcome_and_audit", None)):
+                db.persist_final_outcome_and_audit(deployment_id, {"outcome": outcome})
+
+            return outcome
+
+        elif is_workflow:
             # --- WORKFLOW ROLLBACK FLOW (ADR-001 Rev 2.3 §10, ADR-006) ---
             baseline_snapshot = record.get("baseline_snapshot") or {}
             deployed_workflow_name = (

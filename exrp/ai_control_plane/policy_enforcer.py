@@ -89,6 +89,14 @@ class PolicyEvaluationResult:
     violated_policies: List[str] = field(default_factory=list)
     reasons: List[str] = field(default_factory=list)
 
+    def __getitem__(self, item: str) -> Any:
+        if hasattr(self, item):
+            return getattr(self, item)
+        raise KeyError(item)
+
+    def get(self, item: str, default: Any = None) -> Any:
+        return getattr(self, item, default)
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
@@ -493,18 +501,56 @@ class RuntimePolicyCatalog:
         doc: Any,
         user_roles: Optional[List[str]] = None,
         raise_exception: bool = True,
+        db: Any = None,
     ) -> PolicyEvaluationResult:
         """Evaluates policies applicable to Document.validate."""
-        return self._evaluate_stage(doc, stage="validate", user_roles=user_roles, raise_exception=raise_exception)
+        res = self._evaluate_stage(doc, stage="validate", user_roles=user_roles, raise_exception=False)
+        from .cross_doc_policy import cross_doc_catalog
+        cross_res = cross_doc_catalog.evaluate_cross_doc_policies(doc, stage="validate", db=db)
+
+        combined_violated = list(res.violated_policies) + list(cross_res.violated_policies)
+        combined_reasons = list(res.reasons) + list(cross_res.reasons)
+        allowed = (len(combined_violated) == 0)
+
+        result = PolicyEvaluationResult(
+            allowed=allowed,
+            violated_policies=combined_violated,
+            reasons=combined_reasons,
+        )
+        if not allowed and raise_exception:
+            primary_id = combined_violated[0]
+            primary_reason = combined_reasons[0]
+            error_msg = f"Runtime Policy Violation [{primary_id}]: {primary_reason}"
+            raise RuntimePolicyViolation(error_msg, policy_id=primary_id, result=result)
+        return result
 
     def evaluate_submit(
         self,
         doc: Any,
         user_roles: Optional[List[str]] = None,
         raise_exception: bool = True,
+        db: Any = None,
     ) -> PolicyEvaluationResult:
         """Evaluates policies applicable to Document.before_submit."""
-        return self._evaluate_stage(doc, stage="submit", user_roles=user_roles, raise_exception=raise_exception)
+        res = self._evaluate_stage(doc, stage="submit", user_roles=user_roles, raise_exception=False)
+        from .cross_doc_policy import cross_doc_catalog
+        cross_res = cross_doc_catalog.evaluate_cross_doc_policies(doc, stage="submit", db=db)
+
+        combined_violated = list(res.violated_policies) + list(cross_res.violated_policies)
+        combined_reasons = list(res.reasons) + list(cross_res.reasons)
+        allowed = (len(combined_violated) == 0)
+
+        result = PolicyEvaluationResult(
+            allowed=allowed,
+            violated_policies=combined_violated,
+            reasons=combined_reasons,
+        )
+        if not allowed and raise_exception:
+            primary_id = combined_violated[0]
+            primary_reason = combined_reasons[0]
+            error_msg = f"Runtime Policy Violation [{primary_id}]: {primary_reason}"
+            raise RuntimePolicyViolation(error_msg, policy_id=primary_id, result=result)
+        return result
 
     def evaluate_update_after_submit(
         self,

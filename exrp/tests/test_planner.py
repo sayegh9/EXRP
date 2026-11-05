@@ -714,6 +714,173 @@ class TestAIConfigurationPlanner(unittest.TestCase):
         self.assertIn("mermaid_graph", result.validation)
         self.assertTrue(result.validation["mermaid_graph"].startswith("graph TD"))
 
+    def test_19_conversational_report_planning_valid_proposal(self):
+        """
+        Test 19: User prompt 'Generate a report of all pending Sales Orders over 25000'
+        produces valid create_report proposal with columns, filters, and chart.
+        """
+        planner = AIConfigurationPlanner(mock_mode=True)
+        result = planner.plan_change(
+            doctype="Sales Order",
+            user_prompt="Generate a report of all pending Sales Orders over 25000",
+        )
+
+        self.assertTrue(result.success, f"Planning failed: {result.error_message}")
+        self.assertIsNotNone(result.proposal)
+        self.assertEqual(result.proposal.intent, "create_report")
+        self.assertEqual(result.proposal.target_doctype, "Sales Order")
+        self.assertIsNotNone(result.proposal.report)
+
+        report = result.proposal.report
+        self.assertEqual(report["ref_doctype"], "Sales Order")
+        self.assertEqual(report["report_name"], "Sales Order High-Value Pending Report")
+
+        # Verify columns
+        self.assertIn("columns", report)
+        col_names = [c["fieldname"] if isinstance(c, dict) else c.fieldname for c in report["columns"]]
+        self.assertIn("name", col_names)
+        self.assertIn("customer", col_names)
+        self.assertIn("status", col_names)
+        self.assertIn("grand_total", col_names)
+
+        # Verify filters
+        self.assertIn("filters", report)
+        self.assertEqual(len(report["filters"]), 2)
+        status_filter = next(f for f in report["filters"] if (f["fieldname"] if isinstance(f, dict) else f.fieldname) == "status")
+        total_filter = next(f for f in report["filters"] if (f["fieldname"] if isinstance(f, dict) else f.fieldname) == "grand_total")
+        self.assertEqual(status_filter["operator"] if isinstance(status_filter, dict) else status_filter.operator, "=")
+        self.assertEqual(status_filter["value"] if isinstance(status_filter, dict) else status_filter.value, "Pending")
+        self.assertEqual(total_filter["operator"] if isinstance(total_filter, dict) else total_filter.operator, ">")
+        self.assertEqual(total_filter["value"] if isinstance(total_filter, dict) else total_filter.value, 25000)
+
+        # Verify chart
+        self.assertIsNotNone(report.get("chart"))
+        chart = report["chart"]
+        self.assertEqual(chart["chart_type"], "Bar")
+        self.assertEqual(chart["x_field"], "customer")
+        self.assertIn("grand_total", chart["y_fields"])
+
+    def test_20_report_validation_attaches_preview_data(self):
+        """
+        Test 20: Verifies that declarative report planning validation attaches
+        sample preview_data to PlannerResult.validation for UI preview in Sidecar.
+        """
+        planner = AIConfigurationPlanner(mock_mode=True)
+        result = planner.plan_change(
+            doctype="Sales Order",
+            user_prompt="Generate a report of all pending Sales Orders over 25000",
+        )
+
+        self.assertTrue(result.success)
+        self.assertIsNotNone(result.validation)
+        self.assertIn("preview_data", result.validation)
+        preview_data = result.validation["preview_data"]
+        self.assertIsInstance(preview_data, list)
+        self.assertGreater(len(preview_data), 0)
+        first_row = preview_data[0]
+        self.assertIn("name", first_row)
+        self.assertIn("customer", first_row)
+        self.assertIn("grand_total", first_row)
+
+    def test_21_report_invariant_attack_on_tier0_user_rejected(self):
+        """
+        Test 21: Verifies that an invariant attack attempting to create a report on Tier 0
+        restricted DocType 'User' is rejected cleanly without compromising enterprise invariants.
+        """
+        planner = AIConfigurationPlanner(mock_mode=True)
+        result = planner.plan_change(
+            doctype="User",
+            user_prompt="Generate a report of all pending User accounts",
+            max_retries=2,
+        )
+
+        self.assertFalse(result.success, "Report generation on Tier 0 User DocType must be rejected.")
+        self.assertIsNotNone(result.error_message)
+        self.assertTrue(
+            "user" in result.error_message.lower() or "tier 0" in result.error_message.lower() or "prohibited" in result.error_message.lower(),
+            f"Error message must cite User or prohibited: {result.error_message}"
+        )
+        self.assertGreaterEqual(len(result.feedback_history), 1)
+        self.assertIn("rejected", result.feedback_history[0].lower())
+
+    def test_22_report_self_correction_feedback_loop_on_invalid_operator(self):
+        """
+        Test 22: Verifies that proposing an invalid report filter operator
+        triggers the self-correction feedback loop and corrects to a valid report definition.
+        """
+        planner = AIConfigurationPlanner(mock_mode=True)
+        result = planner.plan_change(
+            doctype="Sales Order",
+            user_prompt="Create a report with invalid_operator test_self_correction for Sales Order",
+            max_retries=2,
+        )
+
+        self.assertTrue(result.success, "Should succeed after self-correcting on attempt 2")
+        self.assertEqual(result.attempts, 2)
+        self.assertEqual(len(result.feedback_history), 1)
+        self.assertIn("Your previous report proposal was rejected:", result.feedback_history[0])
+        self.assertIsNotNone(result.validation)
+        self.assertIn("preview_data", result.validation)
+
+    def test_23_gemini_interactions_report_structured_generation(self):
+        """
+        Test 23: Verifies Google GenAI Interactions API client structured generation contract
+        when generating a create_report declarative proposal.
+        """
+        recorded_call = {}
+
+        class MockGeminiReportInteractions:
+            def create(self, **kwargs):
+                recorded_call.update(kwargs)
+                mock_json_response = {
+                    "intent": "create_report",
+                    "target_doctype": "Sales Order",
+                    "summary": "Pending high-value Sales Orders report",
+                    "reasoning": "Interactions API structured output test",
+                    "governance_tier": 1,
+                    "changes": [],
+                    "report": {
+                        "report_name": "Sales Order High-Value Pending Report",
+                        "ref_doctype": "Sales Order",
+                        "columns": [
+                            {"fieldname": "name", "label": "ID"},
+                            {"fieldname": "customer", "label": "Customer"},
+                            {"fieldname": "status", "label": "Status"},
+                            {"fieldname": "grand_total", "label": "Grand Total"},
+                        ],
+                        "filters": [
+                            {"fieldname": "status", "operator": "=", "value": "Pending"},
+                            {"fieldname": "grand_total", "operator": ">", "value": 25000},
+                        ],
+                        "sort_by": "grand_total",
+                        "sort_order": "desc",
+                        "chart": {
+                            "chart_type": "Bar",
+                            "x_field": "customer",
+                            "y_fields": ["grand_total"],
+                        },
+                        "roles": ["All"],
+                    },
+                }
+                return types.SimpleNamespace(output_text=json.dumps(mock_json_response))
+
+        class MockGenAIClient:
+            def __init__(self):
+                self.interactions = MockGeminiReportInteractions()
+
+        fake_client = MockGenAIClient()
+        planner = AIConfigurationPlanner(client=fake_client, model="gemini-3.8-flash")
+        result = planner.plan_change(
+            doctype="Sales Order",
+            user_prompt="Generate a report of all pending Sales Orders over 25000",
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(recorded_call["model"], "gemini-3.8-flash")
+        self.assertIn("create_report", recorded_call["input"])
+        self.assertIn("preview_data", result.validation)
+        self.assertIsInstance(result.validation["preview_data"], list)
+
 
 if __name__ == "__main__":
     unittest.main()

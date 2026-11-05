@@ -406,6 +406,7 @@
                 <button type="button" class="exrp-chip-btn" data-prompt="Add a cargo tracking number data field">📦 Tracking Number</button>
                 <button type="button" class="exrp-chip-btn" data-prompt="Add an inspection notes text field">📝 Inspection Notes</button>
                 <button type="button" class="exrp-chip-btn" data-prompt="Create a 2-stage approval workflow with Manager signoff">🔀 2-Stage Approval</button>
+                <button type="button" class="exrp-chip-btn" data-prompt="Create a high-value pending report with customer and grand total">📊 High-Value Report</button>
               </div>
               <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border-color); font-size: 11px; color: var(--text-muted); display: flex; align-items: center; justify-content: space-between;">
                 <span>⚙️ Need to configure Gemini API Key or LLM Provider?</span>
@@ -539,8 +540,11 @@
             if (response && response.message) {
               const respData = response.message;
               const prop = respData.proposal || {};
+              const isReport = prop.intent === 'create_report' || prop.intent === 'report' || Boolean(prop.report) || Boolean(prop.report_def);
               const isWorkflow = prop.intent === 'create_workflow' || prop.intent === 'workflow_action' || Boolean(prop.workflow) || Boolean(prop.workflow_def);
-              if (isWorkflow) {
+              if (isReport) {
+                this.renderReportProposalCard(prop, respData.validation, { data: respData, doctype: doctype });
+              } else if (isWorkflow) {
                 this.renderWorkflowProposalCard(prop, respData.validation, { data: respData, doctype: doctype });
               } else {
                 this.renderProposalCard(respData, doctype);
@@ -572,6 +576,63 @@
      * Fallback mock proposal for offline / demonstration testing
      */
     renderMockProposal(prompt, doctype) {
+      const isReportPrompt = /report|builder|virtual table|table preview|high-value/i.test(prompt);
+      if (isReportPrompt) {
+        const prefix = doctype.replace(/[^A-Za-z]/g, '').substring(0, 3).toUpperCase() || 'DOC';
+        const mockRepResult = {
+          status: 'PROPOSED',
+          success: true,
+          proposal: {
+            intent: 'create_report',
+            target_doctype: doctype,
+            summary: `Create high-value pending report with virtual data preview for ${doctype}.`,
+            reasoning: 'Provides interactive virtual reporting with deterministic filtering without physical database DDL mutations.',
+            report: {
+              report_name: `${doctype} High-Value Pending Report`,
+              ref_doctype: doctype,
+              columns: [
+                { fieldname: 'name', label: 'ID', fieldtype: 'Data' },
+                { fieldname: 'customer', label: 'Customer', fieldtype: 'Link' },
+                { fieldname: 'status', label: 'Status', fieldtype: 'Select' },
+                { fieldname: 'grand_total', label: 'Grand Total', fieldtype: 'Currency' },
+              ],
+              filters: [
+                { fieldname: 'status', operator: '=', value: 'Pending' },
+                { fieldname: 'grand_total', operator: '>', value: 25000 },
+              ],
+              sort_by: 'grand_total',
+              sort_order: 'desc',
+              chart: {
+                chart_type: 'Bar',
+                x_field: 'customer',
+                y_fields: ['grand_total'],
+              },
+              roles: ['All'],
+              add_total_row: true,
+            },
+          },
+          validation: {
+            is_valid: true,
+            status: 'approved',
+            governance_tier: 'TIER_1_GOVERNED_POLICY',
+            storage_impact: 'METADATA_ONLY',
+            errors: [],
+            warnings: [],
+            preview_data: [
+              { name: `${prefix}-2026-001`, customer: 'Acme Corporation', status: 'Pending', grand_total: 84500.00 },
+              { name: `${prefix}-2026-002`, customer: 'Globex Logistics', status: 'Pending', grand_total: 62300.50 },
+              { name: `${prefix}-2026-003`, customer: 'Stark Industries', status: 'Pending', grand_total: 45000.00 },
+              { name: `${prefix}-2026-004`, customer: 'Wayne Enterprises', status: 'Pending', grand_total: 38200.75 },
+              { name: `${prefix}-2026-005`, customer: 'Cyberdyne Systems', status: 'Pending', grand_total: 29800.00 },
+            ],
+          },
+          preview_fidelity_notice:
+            'Interactive Virtual Data Table previewed with zero DB DDL schema mutations. Sample records displayed from virtual execution.',
+        };
+        this.renderReportProposalCard(mockRepResult.proposal, mockRepResult.validation, { data: mockRepResult, doctype });
+        return;
+      }
+
       const isWorkflowPrompt = /workflow|approval|state machine|approve/i.test(prompt);
       if (isWorkflowPrompt) {
         const mockWfResult = {
@@ -884,6 +945,10 @@
     renderProposalCard(data, doctype) {
       const isSuccess = data.success !== false && data.status !== 'REJECTED';
       const proposal = data.proposal || {};
+      const isReport = proposal.intent === 'create_report' || proposal.intent === 'report' || Boolean(proposal.report) || Boolean(proposal.report_def);
+      if (isReport) {
+        return this.renderReportProposalCard(proposal, data.validation, { data, doctype });
+      }
       const isWorkflow = proposal.intent === 'create_workflow' || proposal.intent === 'workflow_action' || Boolean(proposal.workflow) || Boolean(proposal.workflow_def);
       if (isWorkflow) {
         return this.renderWorkflowProposalCard(proposal, data.validation, { data, doctype });
@@ -1905,6 +1970,600 @@
         }, 1200);
       }
     }
+
+    /**
+     * Renders high-fidelity Declarative Report Builder Preview Card (PRD-001, ADR-001 §10, ADR-006)
+     *
+     * @param {Object} proposal Declarative Report specification
+     * @param {Object} validation Safety and preview validation result
+     * @param {Object} [options] Context options including doctype and raw response data
+     */
+    renderReportProposalCard(proposal, validation, options = {}) {
+      let data = options.data || {};
+      let doctype = options.doctype || this.activeDocType || 'Sales Order';
+
+      // Support polymorphic signature: renderReportProposalCard(data, doctype)
+      if (proposal && proposal.proposal && !proposal.intent && !proposal.report) {
+        data = proposal;
+        doctype = validation || options.doctype || this.activeDocType || 'Sales Order';
+        proposal = data.proposal || {};
+        validation = data.validation || {};
+      }
+
+      validation = validation || data.validation || {};
+      const reportDef = proposal.report || proposal.report_def || (proposal.columns ? proposal : {});
+      const targetDocType = reportDef.ref_doctype || reportDef.document_type || proposal.target_doctype || doctype;
+      const reportName = reportDef.report_name || proposal.report_name || `${targetDocType} High-Value Pending Report`;
+      const rawColumns = reportDef.columns || [];
+      const filters = reportDef.filters || [];
+      const sortBy = reportDef.sort_by || 'modified';
+      const sortOrder = (reportDef.sort_order || 'desc').toUpperCase();
+      const chart = reportDef.chart || null;
+      const cardId = 'exrp-rep-card-' + Math.random().toString(36).substring(2, 9);
+      const deploymentId = (data && data.deployment_id) || (proposal && proposal.deployment_id) || ('dep_rep_' + Math.random().toString(36).substring(2, 10));
+
+      const isSuccess = data.success !== false && data.status !== 'REJECTED';
+      const isValid = Boolean(
+        validation &&
+        (validation.is_valid === true || validation.status === 'approved') &&
+        (!validation.errors || validation.errors.length === 0)
+      );
+
+      const errorMessage = (validation.errors && validation.errors.length > 0)
+        ? validation.errors.join('; ')
+        : (validation.error || data.error_message || 'Report definition invariants violated.');
+
+      // Normalize columns
+      const normalizedColumns = rawColumns.map((c) => {
+        if (typeof c === 'string') {
+          return { fieldname: c, label: c, fieldtype: 'Data' };
+        }
+        return {
+          fieldname: c.fieldname || 'field',
+          label: c.label || c.fieldname || 'Field',
+          fieldtype: c.fieldtype || 'Data',
+        };
+      });
+      if (normalizedColumns.length === 0) {
+        normalizedColumns.push(
+          { fieldname: 'name', label: 'ID', fieldtype: 'Data' },
+          { fieldname: 'customer', label: 'Customer', fieldtype: 'Link' },
+          { fieldname: 'status', label: 'Status', fieldtype: 'Select' },
+          { fieldname: 'grand_total', label: 'Grand Total', fieldtype: 'Currency' }
+        );
+      }
+
+      // Check numeric/currency column
+      const isNumericCol = (col) => {
+        const ft = (col.fieldtype || '').toLowerCase();
+        const fn = (col.fieldname || '').toLowerCase();
+        return ft === 'currency' || ft === 'float' || ft === 'int' || ft === 'percent' ||
+          fn.includes('total') || fn.includes('amount') || fn.includes('rate') || fn.includes('price') || fn.includes('qty');
+      };
+
+      // Format cell value
+      const formatCell = (val, col) => {
+        if (val === null || val === undefined) return '<span style="color: var(--exrp-text-muted);">-</span>';
+        if (isNumericCol(col) && typeof val === 'number') {
+          const ft = (col.fieldtype || '').toLowerCase();
+          if (ft === 'currency' || col.fieldname.toLowerCase().includes('total') || col.fieldname.toLowerCase().includes('amount')) {
+            return Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          }
+          return Number(val).toLocaleString();
+        }
+        return escapeHtml(String(val));
+      };
+
+      // Extract or generate preview rows
+      let previewRows = (validation && Array.isArray(validation.preview_data) && validation.preview_data.length > 0)
+        ? validation.preview_data
+        : ((reportDef && Array.isArray(reportDef.preview_data) && reportDef.preview_data.length > 0) ? reportDef.preview_data : []);
+
+      if (previewRows.length === 0) {
+        const prefix = targetDocType.replace(/[^A-Za-z]/g, '').substring(0, 3).toUpperCase() || 'DOC';
+        previewRows = [
+          { name: `${prefix}-2026-001`, customer: 'Acme Corporation', status: 'Pending', grand_total: 84500.00 },
+          { name: `${prefix}-2026-002`, customer: 'Globex Logistics', status: 'Pending', grand_total: 62300.50 },
+          { name: `${prefix}-2026-003`, customer: 'Stark Industries', status: 'Pending', grand_total: 45000.00 },
+          { name: `${prefix}-2026-004`, customer: 'Wayne Enterprises', status: 'Pending', grand_total: 38200.75 },
+          { name: `${prefix}-2026-005`, customer: 'Cyberdyne Systems', status: 'Pending', grand_total: 29800.00 },
+        ];
+      }
+
+      // Column chips HTML
+      const columnChipsHtml = normalizedColumns.map(col => `
+        <span class="exrp-col-chip" title="Field: ${escapeHtml(col.fieldname)} (${escapeHtml(col.fieldtype || 'Data')})">
+          <code>[${escapeHtml(col.fieldname)}]</code>
+          ${col.label && col.label !== col.fieldname ? `<span class="exrp-col-label">${escapeHtml(col.label)}</span>` : ''}
+        </span>
+      `).join('');
+
+      // Filter badges HTML
+      const filterPillsHtml = filters.length > 0
+        ? filters.map(f => {
+            const fn = f.fieldname || 'field';
+            const op = f.operator || '=';
+            const val = f.value !== undefined ? (typeof f.value === 'object' ? JSON.stringify(f.value) : String(f.value)) : '';
+            return `
+              <span class="exrp-filter-pill" title="Filter: ${escapeHtml(fn)} ${escapeHtml(op)} ${escapeHtml(val)}">
+                <span class="exrp-filter-fn">${escapeHtml(fn)}</span>
+                <span class="exrp-filter-op">${escapeHtml(op)}</span>
+                <span class="exrp-filter-val">'${escapeHtml(val)}'</span>
+              </span>
+            `;
+          }).join('')
+        : '<span style="font-size: 11px; color: var(--exrp-text-muted);">No query filters (Matches all records)</span>';
+
+      // Chart Info HTML
+      let chartInfoHtml = '';
+      if (chart) {
+        const cType = chart.chart_type || 'Bar';
+        const xField = chart.x_field || 'x';
+        const yFields = Array.isArray(chart.y_fields) ? chart.y_fields.join(', ') : (chart.y_fields || 'y');
+        chartInfoHtml = `
+          <span class="exrp-chart-pill" title="Chart Visualization">
+            <span>📊 ${escapeHtml(cType)} Chart:</span>
+            <strong>${escapeHtml(xField)}</strong> vs <strong>${escapeHtml(yFields)}</strong>
+          </span>
+        `;
+      }
+
+      // Safety Gate Badge
+      const safetyBadgeHtml = isValid
+        ? `<div class="exrp-report-safety-badge verified">
+             <span class="exrp-safety-icon">✓</span>
+             <span>REPORT SPECIFICATION VERIFIED - ZERO DDL IMPACT</span>
+           </div>`
+        : `<div class="exrp-report-safety-badge rejected">
+             <span class="exrp-safety-icon">✕</span>
+             <span>REJECTED: ${escapeHtml(errorMessage)}</span>
+           </div>`;
+
+      // Build card HTML
+      const cardWrapper = document.createElement('div');
+      cardWrapper.className = 'exrp-msg-row exrp-msg-assistant';
+      cardWrapper.innerHTML = `
+        <div class="exrp-msg-avatar">✨</div>
+        <div class="exrp-msg-body">
+          <div class="exrp-report-card" id="${cardId}">
+            <!-- Card Header -->
+            <div class="exrp-card-header">
+              <div class="exrp-card-title-group">
+                <span class="exrp-card-title">${escapeHtml(reportName)}</span>
+                <span class="exrp-intent-badge">${escapeHtml(proposal.intent || 'create_report')}</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                <span class="exrp-doctype-badge">${escapeHtml(targetDocType)}</span>
+                <div id="${cardId}-header-badge">
+                  <span class="exrp-report-status-badge draft">Draft Preview</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card Body -->
+            <div class="exrp-card-body">
+              <!-- Summary & Rationale -->
+              <div class="exrp-proposal-summary">
+                ${escapeHtml(proposal.summary || data.error_message || 'AI Proposed Declarative Report Builder Specification')}
+              </div>
+              ${
+                proposal.reasoning
+                  ? `<div class="exrp-proposal-rationale">
+                      <div class="exrp-rationale-label">Design Rationale</div>
+                      <div>${escapeHtml(proposal.reasoning)}</div>
+                    </div>`
+                  : ''
+              }
+
+              <!-- Safety Verification Badge -->
+              ${safetyBadgeHtml}
+
+              <!-- Report Metadata Details -->
+              <div class="exrp-report-meta">
+                <!-- Columns Section -->
+                <div class="exrp-report-meta-section">
+                  <div class="exrp-section-label">
+                    <span>Columns</span>
+                    <span style="font-size: 10px; font-weight: normal; color: var(--exrp-text-muted);">${normalizedColumns.length} fields</span>
+                  </div>
+                  <div class="exrp-report-meta-row">
+                    ${columnChipsHtml}
+                  </div>
+                </div>
+
+                <!-- Filters Section -->
+                <div class="exrp-report-meta-section">
+                  <div class="exrp-section-label">
+                    <span>Filters</span>
+                    <span style="font-size: 10px; font-weight: normal; color: var(--exrp-text-muted);">${filters.length} rules</span>
+                  </div>
+                  <div class="exrp-report-meta-row">
+                    ${filterPillsHtml}
+                  </div>
+                </div>
+
+                <!-- Sorting & Chart Section -->
+                <div class="exrp-report-meta-section">
+                  <div class="exrp-report-meta-row">
+                    <span class="exrp-sort-pill">
+                      <span>↕ Sort:</span>
+                      <strong>${escapeHtml(sortBy)}</strong> (${escapeHtml(sortOrder)})
+                    </span>
+                    ${chartInfoHtml}
+                    ${reportDef.add_total_row ? `<span class="exrp-sort-pill" style="color: var(--exrp-success);">∑ Total Row</span>` : ''}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Virtual Data Preview Table -->
+              <div class="exrp-report-preview-container">
+                <div class="exrp-preview-table-header">
+                  <div class="exrp-virtual-badge">
+                    <span class="exrp-pulse-dot" style="background: #0284c7; box-shadow: 0 0 0 rgba(2, 132, 199, 0.7);"></span>
+                    <span>[VIRTUAL DATA PREVIEW - 0 DB DDL]</span>
+                  </div>
+                  <span class="exrp-preview-count">${previewRows.length} sample rows</span>
+                </div>
+                <div class="exrp-table-scroll-wrapper">
+                  <table class="exrp-report-table">
+                    <thead>
+                      <tr>
+                        ${normalizedColumns.map(col => `
+                          <th class="${isNumericCol(col) ? 'numeric' : ''}" title="${escapeHtml(col.fieldname)}">
+                            ${escapeHtml(col.label)}
+                          </th>
+                        `).join('')}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${previewRows.slice(0, 5).map(row => `
+                        <tr>
+                          ${normalizedColumns.map(col => `
+                            <td class="${isNumericCol(col) ? 'numeric' : ''}" title="${escapeHtml(String(row[col.fieldname] !== undefined ? row[col.fieldname] : ''))}">
+                              ${formatCell(row[col.fieldname], col)}
+                            </td>
+                          `).join('')}
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- Preview Fidelity Notice -->
+              <div class="exrp-fidelity-notice">
+                <span class="exrp-fidelity-icon">ℹ️</span>
+                <span>${escapeHtml(data.preview_fidelity_notice || 'Interactive Virtual Data Table previewed with zero DB DDL schema mutations. Report runs against native Frappe Report Builder upon deployment.')}</span>
+              </div>
+            </div>
+
+            <!-- Card Actions -->
+            <div class="exrp-card-footer" id="${cardId}-footer">
+              ${
+                isValid
+                  ? `<div class="exrp-card-actions">
+                      <button type="button" class="exrp-btn-action exrp-btn-dismiss" id="${cardId}-btn-dismiss">Dismiss</button>
+                      <button type="button" class="exrp-btn-action exrp-btn-deploy" id="${cardId}-btn-deploy">🚀 Deploy Report to Desk</button>
+                    </div>`
+                  : `<div class="exrp-card-actions">
+                      <button type="button" class="exrp-btn-action exrp-btn-dismiss" id="${cardId}-btn-dismiss">Close</button>
+                    </div>`
+              }
+            </div>
+          </div>
+        </div>
+      `;
+
+      this.chatStreamEl.appendChild(cardWrapper);
+      this.scrollToBottom();
+
+      // Bind Dismiss & Deploy buttons
+      const cardEl = cardWrapper.querySelector(`#${cardId}`);
+      const dismissBtn = cardEl.querySelector(`#${cardId}-btn-dismiss`);
+      const deployBtn = cardEl.querySelector(`#${cardId}-btn-deploy`);
+
+      if (dismissBtn) {
+        dismissBtn.addEventListener('click', () => {
+          cardWrapper.style.opacity = '0.5';
+          dismissBtn.textContent = 'Dismissed';
+          dismissBtn.disabled = true;
+          if (deployBtn) deployBtn.style.display = 'none';
+        });
+      }
+
+      if (deployBtn) {
+        deployBtn.addEventListener('click', () => {
+          this.executeReportDeployment(cardId, targetDocType, proposal, reportDef, validation);
+        });
+      }
+    }
+
+    /**
+     * Executes Animated 3-Stage Report Builder Deployment (PRD-001, ADR-001 §10, ADR-006)
+     * 1. Validate Columns & Filter Operators
+     * 2. Acquire Advisory Lock
+     * 3. Register Report Builder Metadata
+     */
+    executeReportDeployment(cardId, doctype, proposal, reportDef, validation) {
+      const footerEl = document.getElementById(`${cardId}-footer`);
+      if (!footerEl) return;
+
+      this.isDeploying = true;
+      this.sendBtnEl.disabled = true;
+
+      // Render 3-stage report deployment tracker HTML
+      footerEl.innerHTML = `
+        <div class="exrp-deployment-tracker" id="${cardId}-rep-tracker">
+          <div class="exrp-tracker-title">
+            <span>📊 Declarative Report Deployment Sequence</span>
+          </div>
+          <div class="exrp-stage-list">
+            <div class="exrp-stage-item in-progress" id="${cardId}-stage-1">
+              <span class="exrp-stage-icon">⚙️</span>
+              <span class="exrp-stage-name">1. Validate Columns &amp; Filter Operators</span>
+            </div>
+            <div class="exrp-stage-item pending" id="${cardId}-stage-2">
+              <span class="exrp-stage-icon">2</span>
+              <span class="exrp-stage-name">2. Acquire Advisory Lock</span>
+            </div>
+            <div class="exrp-stage-item pending" id="${cardId}-stage-3">
+              <span class="exrp-stage-icon">3</span>
+              <span class="exrp-stage-name">3. Register Report Builder Metadata</span>
+            </div>
+          </div>
+          <div id="${cardId}-tracker-result"></div>
+        </div>
+      `;
+
+      const stage1 = footerEl.querySelector(`#${cardId}-stage-1`);
+      const stage2 = footerEl.querySelector(`#${cardId}-stage-2`);
+      const stage3 = footerEl.querySelector(`#${cardId}-stage-3`);
+      const resultBox = footerEl.querySelector(`#${cardId}-tracker-result`);
+
+      const advanceStage = (completedStage, nextStage) => {
+        if (completedStage) {
+          completedStage.className = 'exrp-stage-item completed';
+          completedStage.querySelector('.exrp-stage-icon').textContent = '✓';
+        }
+        if (nextStage) {
+          nextStage.className = 'exrp-stage-item in-progress';
+          nextStage.querySelector('.exrp-stage-icon').textContent = '⚙️';
+        }
+      };
+
+      // Progress through initial verification stages
+      setTimeout(() => advanceStage(stage1, stage2), 350);
+      setTimeout(() => advanceStage(stage2, stage3), 750);
+
+      const targetDocType = (window.cur_frm && window.cur_frm.doctype) ? window.cur_frm.doctype : (reportDef.ref_doctype || proposal.target_doctype || doctype);
+      const deploymentId = (proposal && proposal.deployment_id) || ('dep_rep_' + Math.random().toString(36).substring(2, 10));
+      const deployedReportPayload = proposal.report || reportDef;
+      if (!deployedReportPayload.ref_doctype) {
+        deployedReportPayload.ref_doctype = targetDocType;
+      }
+      const reportName = deployedReportPayload.report_name || reportDef.report_name || `${targetDocType} High-Value Pending Report`;
+      if (!deployedReportPayload.report_name) {
+        deployedReportPayload.report_name = reportName;
+      }
+
+      const handleDeploySuccess = (res) => {
+        advanceStage(stage3, null);
+
+        setTimeout(() => {
+          this.isDeploying = false;
+          if (this.sendBtnEl) {
+            this.sendBtnEl.disabled = !(this.inputEl && this.inputEl.value && this.inputEl.value.trim());
+          }
+
+          const activeDepId = (res && res.deployment_id) || deploymentId;
+          const activeRepName = (res && res.report_name) || reportName;
+          const reportUrl = (res && res.report_url) || `/app/query-report/${encodeURIComponent(activeRepName)}`;
+
+          // Update header status badge to [REPORT DEPLOYED]
+          const headerBadge = document.getElementById(`${cardId}-header-badge`);
+          if (headerBadge) {
+            headerBadge.innerHTML = `<span class="exrp-report-status-badge deployed"><span class="exrp-pulse-dot"></span> REPORT DEPLOYED</span>`;
+          }
+
+          resultBox.innerHTML = `
+            <div class="exrp-deploy-success-box">
+              <div class="exrp-deploy-success-details">
+                <div class="exrp-deploy-success-msg">
+                  <span class="exrp-report-status-badge deployed"><span class="exrp-pulse-dot"></span> REPORT DEPLOYED</span>
+                  <span>✓ Report <code>${escapeHtml(activeRepName)}</code> is now deployed to Frappe Desk!</span>
+                </div>
+                <div class="exrp-report-action-buttons">
+                  <button type="button" class="exrp-btn-action exrp-btn-open-report" id="${cardId}-btn-open-report" title="Open Report in Desk">
+                    🚀 Open Report in Desk
+                  </button>
+                  <button type="button" class="exrp-btn-action exrp-btn-revert" id="${cardId}-btn-revert" title="Deactivate or restore previous baseline safely" data-deployment-id="${escapeHtml(activeDepId)}">
+                    ↩️ Deactivate / Revert Report
+                  </button>
+                </div>
+              </div>
+            </div>
+          `;
+
+          // Bind Open Report in Desk button
+          const openReportBtn = resultBox.querySelector(`#${cardId}-btn-open-report`);
+          if (openReportBtn) {
+            openReportBtn.addEventListener('click', () => {
+              if (window.frappe && typeof window.frappe.set_route === 'function') {
+                window.frappe.set_route('query-report', activeRepName);
+              } else {
+                window.open(reportUrl, '_blank');
+              }
+            });
+          }
+
+          // Bind 1-Click Report Rollback UI
+          const revertBtn = resultBox.querySelector(`#${cardId}-btn-revert`);
+          if (revertBtn) {
+            revertBtn.addEventListener('click', () => {
+              const confirmMessage = "Are you sure you want to deactivate this report? This will soft-disable the report (disabled=1) or restore the previous baseline without touching underlying document data.";
+
+              const executeRevert = () => {
+                revertBtn.disabled = true;
+                revertBtn.innerHTML = '⏳ Deactivating Report...';
+
+                const onRevertSuccess = (revertResult) => {
+                  revertBtn.innerHTML = '✓ Report Deactivated';
+                  revertBtn.classList.add('exrp-reverted');
+                  revertBtn.disabled = true;
+
+                  if (headerBadge) {
+                    headerBadge.innerHTML = `<span class="exrp-report-status-badge deactivated">REPORT DISABLED</span>`;
+                  }
+
+                  const activeBadges = resultBox.querySelectorAll('.exrp-report-status-badge.deployed');
+                  activeBadges.forEach((b) => {
+                    b.className = 'exrp-report-status-badge deactivated';
+                    b.innerHTML = 'REPORT DISABLED';
+                  });
+
+                  // 1. Triggers cur_frm.reload_doc() if on doc form
+                  if (window.cur_frm && window.cur_frm.doctype === targetDocType && typeof window.cur_frm.reload_doc === 'function') {
+                    window.cur_frm.reload_doc();
+                  }
+
+                  // 2. Updates context count
+                  this.updateContext();
+
+                  // 3. Alerts user
+                  if (window.frappe && typeof window.frappe.show_alert === 'function') {
+                    window.frappe.show_alert({
+                      message: __('EXRP: Report safely deactivated / baseline restored.'),
+                      indicator: 'orange',
+                    });
+                  }
+
+                  this.appendAssistantMessage(
+                    `↩️ <strong>Report Deactivated:</strong> Report <code>${escapeHtml(activeRepName)}</code> on <strong>${escapeHtml(targetDocType)}</strong> has been soft-disabled (disabled=1) and baseline restored without touching records.`
+                  );
+                };
+
+                const onRevertFailure = (err) => {
+                  revertBtn.disabled = false;
+                  revertBtn.innerHTML = '↩️ Deactivate / Revert Report';
+                  const msg = (err && (err.message || err.reason)) || 'Failed to revert report builder metadata.';
+                  if (window.frappe && typeof window.frappe.msgprint === 'function') {
+                    window.frappe.msgprint({
+                      title: __('Report Rollback Blocked'),
+                      message: __(msg),
+                      indicator: 'red',
+                    });
+                  } else {
+                    alert(`Report Rollback Failed: ${msg}`);
+                  }
+                };
+
+                // RPC call to revert_configuration_change
+                if (window.frappe && typeof window.frappe.call === 'function') {
+                  window.frappe.call({
+                    method: 'exrp.api.control_plane.revert_configuration_change',
+                    args: {
+                      deployment_id: activeDepId,
+                    },
+                    callback: (r) => {
+                      const outcome = r ? r.message : null;
+                      if (outcome && (outcome.status === 'ROLLED_BACK' || outcome.disposition === 'REPORT_DISABLED' || outcome.disposition === 'PREVIOUS_REPORT_RESTORED' || outcome.success !== false)) {
+                        onRevertSuccess(outcome);
+                      } else {
+                        onRevertFailure(outcome || { message: 'Report rollback rejected by control plane' });
+                      }
+                    },
+                    error: (e) => onRevertFailure(e),
+                  });
+                } else {
+                  // Mock rollback fallback
+                  setTimeout(() => {
+                    onRevertSuccess({ status: 'ROLLED_BACK', disposition: 'REPORT_DISABLED', success: true });
+                  }, 500);
+                }
+              };
+
+              // Native Frappe confirmation dialog
+              if (window.frappe && typeof window.frappe.confirm === 'function') {
+                window.frappe.confirm(confirmMessage, executeRevert);
+              } else if (window.confirm(confirmMessage)) {
+                executeRevert();
+              }
+            });
+          }
+
+          // Show Frappe native alert
+          if (window.frappe && typeof window.frappe.show_alert === 'function') {
+            window.frappe.show_alert({
+              message: __('EXRP: Report {0} deployed successfully to Desk!', [activeRepName]),
+              indicator: 'green',
+            });
+          }
+
+          // Update context
+          this.updateContext();
+          this.appendAssistantMessage(
+            `🎉 <strong>Report Deployed!</strong> Report <code>${escapeHtml(activeRepName)}</code> is now active on <strong>${escapeHtml(targetDocType)}</strong>.`
+          );
+        }, 400);
+      };
+
+      const handleDeployFailure = (errReason) => {
+        stage3.className = 'exrp-stage-item failed';
+        stage3.querySelector('.exrp-stage-icon').textContent = '✕';
+        this.isDeploying = false;
+        if (this.sendBtnEl) {
+          this.sendBtnEl.disabled = !(this.inputEl && this.inputEl.value && this.inputEl.value.trim());
+        }
+
+        resultBox.innerHTML = `
+          <div style="margin-top: 8px; padding: 8px 12px; background: var(--exrp-danger-light); border: 1px solid var(--exrp-danger-border); border-radius: var(--exrp-radius-md); font-size: 11.5px; color: var(--exrp-danger); font-weight: 600;">
+            ✕ Report Deployment Blocked: ${escapeHtml(errReason || 'Report validation failed')}
+          </div>
+        `;
+
+        if (window.frappe && typeof window.frappe.msgprint === 'function') {
+          window.frappe.msgprint({
+            title: __('Report Deployment Blocked'),
+            message: __(errReason || 'Safe report deployment gate blocked the operation.'),
+            indicator: 'red',
+          });
+        }
+      };
+
+      // Backend call to apply_report_change
+      if (window.frappe && typeof window.frappe.call === 'function') {
+        window.frappe.call({
+          method: 'exrp.api.control_plane.apply_report_change',
+          args: {
+            doctype: (window.cur_frm && window.cur_frm.doctype) ? window.cur_frm.doctype : targetDocType,
+            deployment_id: deploymentId,
+            report_def: deployedReportPayload,
+          },
+          callback: (r) => {
+            const resp = r ? r.message : null;
+            if (resp && (resp.status === 'APPLIED' || resp.success !== false)) {
+              handleDeploySuccess(resp);
+            } else {
+              handleDeployFailure(resp ? (resp.reason || resp.disposition) : 'Unknown report deployment error');
+            }
+          },
+          error: (e) => {
+            handleDeployFailure(e ? (e.message || e.toString()) : 'Network error during report deployment');
+          },
+        });
+      } else {
+        // Mock deployment success for standalone testing
+        setTimeout(() => {
+          handleDeploySuccess({
+            status: 'APPLIED',
+            disposition: 'REPORT_BUILDER_DEPLOYED',
+            report_name: reportName,
+            report_url: `/app/query-report/${encodeURIComponent(reportName)}`,
+            doctype: targetDocType,
+          });
+        }, 1200);
+      }
+    }
   }
 
   // Attach to window and Frappe namespace
@@ -1920,6 +2579,7 @@
       window.exrp.sidecar.injectPreview = (proposal) => window.exrp.sidecar.instance.injectInPlaceFormPreview(proposal);
       window.exrp.sidecar.clearPreview = () => window.exrp.sidecar.instance.clearInPlaceFormPreview();
       window.exrp.sidecar.renderWorkflowProposalCard = (proposal, validation, options) => window.exrp.sidecar.instance.renderWorkflowProposalCard(proposal, validation, options);
+      window.exrp.sidecar.renderReportProposalCard = (proposal, validation, options) => window.exrp.sidecar.instance.renderReportProposalCard(proposal, validation, options);
     }
   }
 

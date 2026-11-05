@@ -38,6 +38,21 @@ from .workflow_engine import (
     execute_workflow_deployment,
     generate_mermaid_graph,
 )
+from .report_engine import (
+    ReportColumn,
+    ReportFilter,
+    ReportChartConfig,
+    ReportDefinition,
+    ReportValidationResult,
+    validate_report_definition,
+    get_report_preview_data,
+    execute_report_deployment,
+)
+from .cross_doc_policy import (
+    CrossDocPolicy,
+    CrossDocPolicyCatalog,
+    cross_doc_catalog,
+)
 
 __all__ = [
     "get_compact_doctype_schema",
@@ -49,6 +64,7 @@ __all__ = [
     "execute_single_field_deployment",
     "execute_property_setter_deployment",
     "execute_workflow_deployment",
+    "execute_report_deployment",
     "execute_rollback",
     "ExhaustiveSnapshot",
     "IdempotencyConflictError",
@@ -69,4 +85,14 @@ __all__ = [
     "WorkflowValidationResult",
     "validate_workflow_state_machine",
     "generate_mermaid_graph",
+    "ReportColumn",
+    "ReportFilter",
+    "ReportChartConfig",
+    "ReportDefinition",
+    "ReportValidationResult",
+    "validate_report_definition",
+    "get_report_preview_data",
+    "CrossDocPolicy",
+    "CrossDocPolicyCatalog",
+    "cross_doc_catalog",
 ]
