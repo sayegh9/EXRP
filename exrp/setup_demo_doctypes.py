@@ -1260,6 +1260,7 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
 
     try:
         website_settings = frappe.get_single("Website Settings")
+        website_settings.home_page = "app"
         website_settings.app_logo = "/assets/exrp/images/exrp-logo.svg"
         website_settings.splash_image = "/assets/exrp/images/exrp-logo.svg"
         website_settings.favicon = "/assets/exrp/images/favicon.svg"

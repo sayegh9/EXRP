@@ -19,6 +19,23 @@ app_include_css = [
     "/assets/exrp/css/ai_sidecar.css"
 ]
 
+# Web / Portal assets (Ensures brand styles and theme persistence on portal pages)
+web_include_js = [
+    "/assets/exrp/js/ai_sidecar.bundle.js"
+]
+
+web_include_css = [
+    "/assets/exrp/css/ai_sidecar.css"
+]
+
+# Route root '/' directly to ERP Desk for authenticated users
+website_user_home_page = "app"
+role_home_page = {
+    "System Manager": "app",
+    "Desk User": "app",
+    "All": "app",
+}
+
 # EXRP Official Brand Assets & Logos
 app_logo_url = "/assets/exrp/images/exrp-logo.svg"
 favicon = "/assets/exrp/images/favicon.svg"
