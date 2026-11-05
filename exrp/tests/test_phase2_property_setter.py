@@ -608,6 +608,49 @@ class TestPhase2PropertySetterAndRollback(unittest.TestCase):
         self.assertEqual(rev_res["status"], "ROLLED_BACK")
         self.assertEqual(rev_res["disposition"], "PROPERTY_SETTER_REMOVED")
 
+    def test_13_property_type_map_is_strict_allowlist_and_blocks_depends_on_eval(self):
+        """
+        Verifies that PROPERTY_TYPE_MAP matches ALLOWED_PROPERTY_SETTER_PROPERTIES
+        and execute_property_setter_deployment / apply_property_setter_change reject
+        depends_on, eval: expressions, and unapproved properties on non-protected DocTypes.
+        """
+        from exrp.ai_control_plane.safety_guardrails import ALLOWED_PROPERTY_SETTER_PROPERTIES
+        from exrp.ai_control_plane.property_setter_engine import PROPERTY_TYPE_MAP
+
+        self.assertEqual(set(PROPERTY_TYPE_MAP.keys()), ALLOWED_PROPERTY_SETTER_PROPERTIES)
+
+        # 1. Reject depends_on with eval: JavaScript on non-protected Sales Order.delivery_date
+        res_dep = execute_property_setter_deployment(
+            db=self.adapter,
+            deployment_id="dep_ps_depends_on_block",
+            site_id="site1.local",
+            doctype="Sales Order",
+            fieldname="delivery_date",
+            property_name="depends_on",
+            value="eval:doc.grand_total > 5000",
+            user_roles=["System Manager"],
+        )
+        self.assertFalse(res_dep["success"])
+        self.assertEqual(res_dep["status"], "REJECTED")
+        self.assertEqual(res_dep["disposition"], "ZONE_SAFETY_VIOLATION")
+        self.assertIn("No-Generated-Code Rule Violation", res_dep["reason"])
+        self.assertIsNone(self.adapter.get_property_setter("Sales Order", "delivery_date", "depends_on"))
+
+        # 2. Reject unapproved property (e.g. 'fieldtype') on custom field
+        res_ftype = apply_property_setter_change(
+            doctype="Sales Order",
+            deployment_id="dep_ps_fieldtype_block",
+            fieldname="custom_priority_status",
+            property_name="fieldtype",
+            value="Code",
+            user_roles=["System Manager"],
+            adapter=self.adapter,
+        )
+        self.assertFalse(res_ftype["success"])
+        self.assertEqual(res_ftype["status"], "REJECTED")
+        self.assertEqual(res_ftype["disposition"], "ZONE_SAFETY_VIOLATION")
+        self.assertIn("Unapproved Field Property Violation", res_ftype["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()

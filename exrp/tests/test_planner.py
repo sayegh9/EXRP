@@ -999,6 +999,86 @@ class TestAIConfigurationPlanner(unittest.TestCase):
         self.assertIsNotNone(ps_reqd)
         self.assertEqual(ps_reqd["value"], 0)
 
+    def test_26_proposed_field_change_and_proposal_forbid_extra_keys_and_eval_js(self):
+        """
+        Verifies that ProposedFieldChange and ConfigurationProposal strictly forbid
+        undeclared extra keys (e.g. depends_on, mandatory_depends_on, fetch_from) and
+        reject eval: JavaScript payloads on both add_custom_fields and set_property.
+        """
+        from pydantic import ValidationError
+        from exrp.ai_control_plane.safety_guardrails import ZoneSafetyViolation
+
+        # 1. ProposedFieldChange JSON schema enforces additionalProperties: False
+        field_schema = ProposedFieldChange.model_json_schema()
+        self.assertIs(field_schema.get("additionalProperties"), False)
+
+        # 2. ProposedFieldChange rejects extra key 'depends_on'
+        with self.assertRaises(ValidationError):
+            ProposedFieldChange(
+                fieldname="custom_priority",
+                label="Priority",
+                fieldtype="Data",
+                depends_on="eval:doc.grand_total > 100",
+            )
+
+        # 3. ProposedFieldChange rejects 'eval:' in allowed field 'default'
+        with self.assertRaises(ValidationError):
+            ProposedFieldChange(
+                fieldname="custom_priority",
+                label="Priority",
+                fieldtype="Data",
+                default="eval:frappe.session.user",
+            )
+
+        # 4. ConfigurationProposal with add_custom_fields rejects raw dict containing 'depends_on'
+        with self.assertRaises(ValidationError):
+            ConfigurationProposal(
+                intent="add_custom_fields",
+                target_doctype="Sales Order",
+                summary="Add field with depends_on",
+                reasoning="Testing extra key rejection",
+                changes=[
+                    {
+                        "fieldname": "custom_priority",
+                        "label": "Priority",
+                        "fieldtype": "Data",
+                        "depends_on": "eval:doc.grand_total > 100",
+                    }
+                ],
+            )
+
+        # 5. ConfigurationProposal with set_property rejects unapproved 'depends_on' property
+        with self.assertRaises(ValidationError):
+            ConfigurationProposal(
+                intent="set_property",
+                target_doctype="Sales Order",
+                summary="Set depends_on on delivery_date",
+                reasoning="Testing property allowlist",
+                changes=[
+                    {
+                        "fieldname": "delivery_date",
+                        "property": "depends_on",
+                        "value": "eval:doc.grand_total > 100",
+                    }
+                ],
+            )
+
+        # 6. propose_configuration_change API rejects raw set_property payload with depends_on
+        with self.assertRaises(ZoneSafetyViolation):
+            propose_configuration_change(
+                doctype="Sales Order",
+                proposal_payload={
+                    "intent": "set_property",
+                    "changes": [
+                        {
+                            "fieldname": "delivery_date",
+                            "property": "depends_on",
+                            "value": "eval:doc.grand_total > 100",
+                        }
+                    ],
+                },
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

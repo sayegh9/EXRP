@@ -20,6 +20,9 @@ except ImportError:
     frappe = None
 
 from .safety_guardrails import (
+    ALLOWED_PROPERTY_SETTER_PROPERTIES,
+    PROHIBITED_CODE_PROPERTIES,
+    PROHIBITED_EXPRESSION_PATTERNS,
     TIER_1_GOVERNANCE_ROLES,
     validate_mutation_safety,
     ZoneSafetyViolation,
@@ -30,9 +33,11 @@ from .schema_reconciler import (
     make_bounded_lock_key,
 )
 
+# Strict allowlist and default Frappe property_type mapping for approved Property Setter mutations (§5)
 PROPERTY_TYPE_MAP: Dict[str, str] = {
     "label": "Data",
     "description": "Text",
+    "insert_after": "Data",
     "reqd": "Check",
     "hidden": "Check",
     "read_only": "Check",
@@ -73,8 +78,8 @@ def execute_property_setter_deployment(
     """
     Executes a Property Setter mutation deployment under ADR-001 Rev 2.3 (§5, §8, §9.1).
 
-    1. Evaluates proposal against validate_mutation_safety() (ensuring Tier 0 fields
-       cannot be hidden or altered).
+    1. Evaluates proposal against validate_mutation_safety() and strict PROPERTY_TYPE_MAP allowlist
+       (ensuring Tier 0 fields cannot be hidden or altered and unapproved properties / eval: code are blocked).
     2. Acquires MariaDB GET_LOCK advisory lock with <= 64 char identifier.
     3. Checks idempotency binding and recovers from any ongoing RECOVERY_REQUIRED target.
     4. Persists baseline snapshot before modification in audit journal (fail-closed durability).
@@ -84,29 +89,51 @@ def execute_property_setter_deployment(
     """
     start_time = time.perf_counter()
 
-    # Step 0: Normalize property type and value
-    eff_property_type = property_type
-    if property_type == "Data" and property_name in PROPERTY_TYPE_MAP:
-        eff_property_type = PROPERTY_TYPE_MAP[property_name]
-    normalized_value = normalize_property_value(property_name, eff_property_type, value)
-
-    # Step 1: Evaluates proposal against validate_mutation_safety()
-    proposal_payload: Dict[str, Any] = {
-        "intent": "set_property",
-        "target_doctype": doctype,
-        "changes": [
-            {
-                "fieldname": fieldname or "",
-                "property": property_name,
-                "value": normalized_value,
-            }
-        ],
-    }
-    if user_roles is not None:
-        proposal_payload["user_roles"] = list(user_roles)
-
+    # Step 0: Enforce strict property allowlist and normalize property type and value
     try:
+        if not property_name or not isinstance(property_name, str):
+            raise ZoneSafetyViolation(
+                f"Unapproved Field Property Violation (§5): Missing or invalid property_name '{property_name}'."
+            )
+        prop_lower = property_name.strip().lower()
+        if prop_lower in PROHIBITED_CODE_PROPERTIES:
+            raise ZoneSafetyViolation(
+                f"No-Generated-Code Rule Violation (PRD-001 / ADR-001 §5): Property '{property_name}' "
+                f"(such as 'depends_on' with 'eval:' JavaScript) is strictly prohibited."
+            )
+        if isinstance(value, str) and PROHIBITED_EXPRESSION_PATTERNS.search(value):
+            raise ZoneSafetyViolation(
+                f"No-Generated-Code Rule Violation (PRD-001 / ADR-001 §5): Executable expression or 'eval:' "
+                f"payload in property '{property_name}' ('{value}') is strictly prohibited."
+            )
+
+        eff_property_type = property_type
+        if property_type == "Data" and property_name in PROPERTY_TYPE_MAP:
+            eff_property_type = PROPERTY_TYPE_MAP[property_name]
+        normalized_value = normalize_property_value(property_name, eff_property_type, value)
+
+        # Step 1: Evaluates proposal against validate_mutation_safety()
+        proposal_payload: Dict[str, Any] = {
+            "intent": "set_property",
+            "target_doctype": doctype,
+            "changes": [
+                {
+                    "fieldname": fieldname or "",
+                    "property": property_name,
+                    "value": normalized_value,
+                }
+            ],
+        }
+        if user_roles is not None:
+            proposal_payload["user_roles"] = list(user_roles)
+
         validate_mutation_safety(proposal_payload)
+
+        if property_name not in PROPERTY_TYPE_MAP or property_name not in ALLOWED_PROPERTY_SETTER_PROPERTIES:
+            raise ZoneSafetyViolation(
+                f"Unapproved Field Property Violation (§5): Property '{property_name}' on '{doctype}.{fieldname}' "
+                f"is not in the approved property allowlist {sorted(ALLOWED_PROPERTY_SETTER_PROPERTIES)}."
+            )
     except ZoneSafetyViolation as exc:
         execution_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
         if kwargs.get("raise_on_violation") or kwargs.get("raise_on_safety_violation"):

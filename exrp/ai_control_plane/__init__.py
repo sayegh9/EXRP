@@ -4,7 +4,13 @@ Declarative metadata bridge and safety guardrails for conversational customizati
 """
 
 from .schema_extractor import get_compact_doctype_schema
-from .safety_guardrails import validate_mutation_safety, ZoneSafetyViolation
+from .safety_guardrails import (
+    validate_mutation_safety,
+    ZoneSafetyViolation,
+    ALLOWED_PROPERTY_SETTER_PROPERTIES,
+    ALLOWED_CUSTOM_FIELD_KEYS,
+    PROHIBITED_CODE_PROPERTIES,
+)
 from .ddl_plan_gate import inspect_frappe_ddl_plan, DDLPlanInspection, validate_ddl_plan
 from .schema_reconciler import (
     execute_single_field_deployment,
@@ -14,6 +20,7 @@ from .schema_reconciler import (
 )
 from .planner import (
     ProposedFieldChange,
+    ProposedPropertyChange,
     ConfigurationProposal,
     PlannerResult,
     AIConfigurationPlanner,
@@ -27,7 +34,7 @@ from .policy_enforcer import (
     policy_catalog,
 )
 
-from .property_setter_engine import execute_property_setter_deployment
+from .property_setter_engine import execute_property_setter_deployment, PROPERTY_TYPE_MAP
 from .rollback_engine import execute_rollback
 from .workflow_engine import (
     WorkflowStateModel,
@@ -58,6 +65,10 @@ __all__ = [
     "get_compact_doctype_schema",
     "validate_mutation_safety",
     "ZoneSafetyViolation",
+    "ALLOWED_PROPERTY_SETTER_PROPERTIES",
+    "ALLOWED_CUSTOM_FIELD_KEYS",
+    "PROHIBITED_CODE_PROPERTIES",
+    "PROPERTY_TYPE_MAP",
     "inspect_frappe_ddl_plan",
     "DDLPlanInspection",
     "validate_ddl_plan",
@@ -70,6 +81,7 @@ __all__ = [
     "IdempotencyConflictError",
     "make_bounded_lock_key",
     "ProposedFieldChange",
+    "ProposedPropertyChange",
     "ConfigurationProposal",
     "PlannerResult",
     "AIConfigurationPlanner",

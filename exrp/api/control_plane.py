@@ -696,26 +696,26 @@ class FrappeDeploymentAdapter:
             raise TimeoutError("(1205, 'Lock wait timeout exceeded')")
 
         fieldname = field_def["fieldname"]
+        cf_args = {
+            "doctype": "Custom Field",
+            "dt": doctype,
+            "fieldname": fieldname,
+            "label": field_def.get("label", fieldname),
+            "fieldtype": field_def.get("fieldtype", "Data"),
+            "options": field_def.get("options"),
+            "reqd": field_def.get("reqd", 0),
+            "read_only": field_def.get("read_only", 0),
+            "description": field_def.get("description"),
+            "insert_after": field_def.get("insert_after"),
+            "default": field_def.get("default"),
+        }
         if not self.in_memory:
-            cf_args = {
-                "doctype": "Custom Field",
-                "dt": doctype,
-                "fieldname": fieldname,
-                "label": field_def.get("label", fieldname),
-                "fieldtype": field_def.get("fieldtype", "Data"),
-                "options": field_def.get("options"),
-                "reqd": field_def.get("reqd", 0),
-                "read_only": field_def.get("read_only", 0),
-                "description": field_def.get("description"),
-                "insert_after": field_def.get("insert_after"),
-                "default": field_def.get("default"),
-            }
             cf_doc = self._frappe.get_doc(cf_args)
             cf_doc.insert(ignore_permissions=True)
             if hasattr(self._frappe.db, "commit"):
                 self._frappe.db.commit()
         else:
-            self.custom_fields[(doctype, fieldname)] = dict(field_def)
+            self.custom_fields[(doctype, fieldname)] = dict(cf_args)
             if doctype not in self.table_columns:
                 self.table_columns[doctype] = self._get_default_columns(doctype)
             if not any(c.name == fieldname for c in self.table_columns[doctype]):

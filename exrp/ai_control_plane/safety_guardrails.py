@@ -184,6 +184,71 @@ GOVERNED_SEMANTIC_PROPERTIES: Set[str] = {
     "hidden",
 }
 
+# Strict allowlist of field properties permitted via Property Setter mutations (§5)
+ALLOWED_PROPERTY_SETTER_PROPERTIES: Set[str] = (
+    PRESENTATION_ONLY_PROPERTIES | GOVERNED_SEMANTIC_PROPERTIES
+)
+
+ALLOWED_MUTATION_INTENTS: Set[str] = {
+    "add_custom_fields",
+    "set_property",
+    "quarantine_custom_field",
+    "update_field_property",
+    "property_setter",
+}
+
+# Strict allowlist of keys accepted in add_custom_fields change items (§5.1)
+ALLOWED_CUSTOM_FIELD_KEYS: Set[str] = {
+    "fieldname",
+    "label",
+    "fieldtype",
+    "options",
+    "reqd",
+    "read_only",
+    "description",
+    "insert_after",
+    "default",
+    "permlevel",
+    "state_scoped_reqd",
+    "unique",
+    "search_index",
+    "in_global_search",
+    "is_virtual",
+    "allow_on_submit",
+    "hidden",
+    "in_list_view",
+    "in_standard_filter",
+    "bold",
+    "collapsible",
+}
+
+# Strict allowlist of keys accepted in set_property change items (§5)
+ALLOWED_PROPERTY_CHANGE_KEYS: Set[str] = {
+    "fieldname",
+    "property",
+    "property_name",
+    "value",
+    "property_type",
+}
+
+# Properties that execute or evaluate dynamic code / expressions (strictly prohibited by PRD-001 "no generated code" rule)
+PROHIBITED_CODE_PROPERTIES: Set[str] = {
+    "depends_on",
+    "mandatory_depends_on",
+    "read_only_depends_on",
+    "collapsible_depends_on",
+    "fetch_from",
+    "fetch_if_empty",
+    "client_script",
+    "server_script",
+    "options_script",
+}
+
+PROHIBITED_EXPRESSION_PATTERNS = re.compile(
+    r"(^\s*eval\s*:|\beval\s*:|javascript\s*:|<\s*script\b)",
+    re.IGNORECASE,
+)
+
 
 def validate_mutation_safety(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -204,6 +269,11 @@ def validate_mutation_safety(payload: Dict[str, Any]) -> Dict[str, Any]:
             f"Prohibited intent '{intent}' (DESTRUCTIVE_DDL / Arbitrary Code Execution blocked)."
         )
 
+    if intent not in ALLOWED_MUTATION_INTENTS:
+        raise ZoneSafetyViolation(
+            f"Unapproved Mutation Intent Violation (§5): Intent '{intent}' is not in the allowlist {sorted(ALLOWED_MUTATION_INTENTS)}."
+        )
+
     if target_doctype in ZONE_2_LOCKED_DOCTYPES:
         raise ZoneSafetyViolation(
             f"Zone 2 Compliance Lock Violation (Tier 0 Invariant): DocType '{target_doctype}' is protected."
@@ -218,14 +288,44 @@ def validate_mutation_safety(payload: Dict[str, Any]) -> Dict[str, Any]:
     highest_governance_tier = "TIER_2_ORDINARY_CONFIG"
 
     for change in changes:
+        if not isinstance(change, dict):
+            raise ZoneSafetyViolation("Invalid change item in proposal: expected dictionary.")
+
         raw_fieldname = change.get("fieldname", "")
-        fieldname_lower = raw_fieldname.lower()
-        property_name = change.get("property")
+        fieldname_lower = raw_fieldname.lower() if isinstance(raw_fieldname, str) else ""
+        property_name = change.get("property") if "property" in change else change.get("property_name")
         is_new_custom_field = intent == "add_custom_fields"
         is_custom_field = fieldname_lower.startswith("custom_")
 
+        # Enforce PRD-001 / ADR-001 "No Generated Code" rule: block depends_on and eval:/script expressions
+        for key, val in change.items():
+            key_lower = str(key).strip().lower()
+            if key_lower in PROHIBITED_CODE_PROPERTIES:
+                raise ZoneSafetyViolation(
+                    f"No-Generated-Code Rule Violation (PRD-001 / ADR-001 §5): Property '{key}' "
+                    f"(executable/dynamic expression property) is strictly prohibited."
+                )
+            if isinstance(val, str) and PROHIBITED_EXPRESSION_PATTERNS.search(val):
+                raise ZoneSafetyViolation(
+                    f"No-Generated-Code Rule Violation (PRD-001 / ADR-001 §5): Executable expression or 'eval:' "
+                    f"payload in '{key}' ('{val}') is strictly prohibited."
+                )
+
+        if isinstance(property_name, str) and property_name.strip().lower() in PROHIBITED_CODE_PROPERTIES:
+            raise ZoneSafetyViolation(
+                f"No-Generated-Code Rule Violation (PRD-001 / ADR-001 §5): Setting property '{property_name}' "
+                f"(such as 'depends_on' with 'eval:' JavaScript) is strictly prohibited."
+            )
+
         if is_new_custom_field:
             highest_storage_impact = "ONLINE_ADDITIVE_DDL"
+
+            disallowed_keys = set(change.keys()) - ALLOWED_CUSTOM_FIELD_KEYS
+            if disallowed_keys:
+                raise ZoneSafetyViolation(
+                    f"Unapproved Field Property Violation (§5.1): Disallowed extra keys {sorted(disallowed_keys)} "
+                    f"in custom field proposal. Only {sorted(ALLOWED_CUSTOM_FIELD_KEYS)} are permitted."
+                )
 
             if not VALID_FIELDNAME_RE.match(raw_fieldname):
                 raise ZoneSafetyViolation(
@@ -251,7 +351,7 @@ def validate_mutation_safety(payload: Dict[str, Any]) -> Dict[str, Any]:
 
             # Block index creation, virtual fields, and allow_on_submit in Phase 1 (§5.1)
             for forbidden_flag in ("unique", "search_index", "in_global_search", "is_virtual", "allow_on_submit"):
-                if int(change.get(forbidden_flag, 0)) == 1:
+                if int(change.get(forbidden_flag, 0) or 0) == 1:
                     raise ZoneSafetyViolation(
                         f"Phase 1 Additive Restriction (§5.1): '{forbidden_flag}=1' is not permitted on '{raw_fieldname}'."
                     )
@@ -280,7 +380,7 @@ def validate_mutation_safety(payload: Dict[str, Any]) -> Dict[str, Any]:
                 if allowed_link_doctypes and link_target not in allowed_link_doctypes:
                     raise ZoneSafetyViolation(f"Unresolved Link Target: DocType '{link_target}' is not in allowed targets.")
 
-            if int(change.get("permlevel", 0)) > 0:
+            if int(change.get("permlevel", 0) or 0) > 0:
                 highest_governance_tier = "TIER_1_GOVERNED_POLICY"
 
             if change.get("reqd") == 1 and change.get("default") in (None, "") and not change.get("state_scoped_reqd"):
@@ -292,14 +392,33 @@ def validate_mutation_safety(payload: Dict[str, Any]) -> Dict[str, Any]:
                 highest_governance_tier = "TIER_1_GOVERNED_POLICY"
             continue
 
-        # Existing field mutation
+        # Existing field mutation (Property Setter)
+        disallowed_prop_keys = set(change.keys()) - ALLOWED_PROPERTY_CHANGE_KEYS
+        if disallowed_prop_keys:
+            raise ZoneSafetyViolation(
+                f"Unapproved Property Change Keys (§5): Disallowed extra keys {sorted(disallowed_prop_keys)} "
+                f"in property mutation. Only {sorted(ALLOWED_PROPERTY_CHANGE_KEYS)} are permitted."
+            )
+
+        if not raw_fieldname or not isinstance(raw_fieldname, str) or not raw_fieldname.strip():
+            raise ZoneSafetyViolation(
+                f"Invalid Property Setter Target (§5): 'fieldname' must be a non-empty string on '{target_doctype}'."
+            )
+
+        if not is_custom_field and fieldname_lower in PROTECTED_STANDARD_FIELDS:
+            if property_name not in PRESENTATION_ONLY_PROPERTIES:
+                raise ZoneSafetyViolation(
+                    f"Tier 0 Invariant Protection Violation: Cannot modify '{property_name}' on protected "
+                    f"ERPNext field '{target_doctype}.{raw_fieldname}'."
+                )
+
+        if not property_name or not isinstance(property_name, str) or property_name not in ALLOWED_PROPERTY_SETTER_PROPERTIES:
+            raise ZoneSafetyViolation(
+                f"Unapproved Field Property Violation (§5): Property '{property_name}' on '{target_doctype}.{raw_fieldname}' "
+                f"is not in the approved property allowlist {sorted(ALLOWED_PROPERTY_SETTER_PROPERTIES)}."
+            )
+
         if not is_custom_field:
-            if fieldname_lower in PROTECTED_STANDARD_FIELDS:
-                if property_name not in PRESENTATION_ONLY_PROPERTIES:
-                    raise ZoneSafetyViolation(
-                        f"Tier 0 Invariant Protection Violation: Cannot modify '{property_name}' on protected "
-                        f"ERPNext field '{target_doctype}.{raw_fieldname}'."
-                    )
             if property_name == "reqd" and int(change.get("value", 1)) == 0:
                 raise ZoneSafetyViolation(
                     f"Tier 0 Constraint Weakening Violation: Cannot relax mandatory requirement on standard field '{target_doctype}.{raw_fieldname}'."

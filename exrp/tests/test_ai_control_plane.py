@@ -469,6 +469,107 @@ class TestADR001Rev23(unittest.TestCase):
         self.assertEqual(approved["status"], "approved")
         self.assertEqual(approved["governance_tier"], "TIER_1_GOVERNED_POLICY")
 
+    def test_suite_c_property_allowlist_and_no_generated_code_rule(self):
+        """PRD-001 & ADR-001 §5: Blocks depends_on / eval: JavaScript, unapproved properties, and extra keys on non-protected DocTypes."""
+        # 1. depends_on with eval: JavaScript on non-protected standard field (Sales Order.delivery_date)
+        with self.assertRaises(ZoneSafetyViolation) as ctx_dep_std:
+            validate_mutation_safety({
+                "intent": "set_property",
+                "target_doctype": "Sales Order",
+                "user_roles": ["System Manager"],
+                "changes": [
+                    {
+                        "fieldname": "delivery_date",
+                        "property": "depends_on",
+                        "value": "eval:doc.grand_total > 1000",
+                    }
+                ],
+            })
+        self.assertIn("No-Generated-Code Rule Violation", str(ctx_dep_std.exception))
+
+        # 2. depends_on without eval: on custom field (Lead.custom_notes) is still blocked
+        with self.assertRaises(ZoneSafetyViolation) as ctx_dep_cust:
+            validate_mutation_safety({
+                "intent": "set_property",
+                "target_doctype": "Lead",
+                "user_roles": ["System Manager"],
+                "changes": [
+                    {
+                        "fieldname": "custom_notes",
+                        "property": "depends_on",
+                        "value": " status == 'Open' ",
+                    }
+                ],
+            })
+        self.assertIn("No-Generated-Code Rule Violation", str(ctx_dep_cust.exception))
+
+        # 3. Unapproved property name (e.g. 'fieldtype', 'permlevel', 'precision') on non-protected field
+        for unapproved_prop in ("fieldtype", "permlevel", "precision", "unique", "arbitrary_prop"):
+            with self.assertRaises(ZoneSafetyViolation) as ctx_unapproved:
+                validate_mutation_safety({
+                    "intent": "set_property",
+                    "target_doctype": "Sales Order",
+                    "user_roles": ["System Manager"],
+                    "changes": [
+                        {
+                            "fieldname": "delivery_date",
+                            "property": unapproved_prop,
+                            "value": "1",
+                        }
+                    ],
+                })
+            self.assertIn("Unapproved Field Property Violation", str(ctx_unapproved.exception))
+
+        # 4. eval: payload smuggled inside an otherwise allowed property (e.g. 'default')
+        with self.assertRaises(ZoneSafetyViolation) as ctx_eval_default:
+            validate_mutation_safety({
+                "intent": "set_property",
+                "target_doctype": "Sales Order",
+                "user_roles": ["System Manager"],
+                "changes": [
+                    {
+                        "fieldname": "custom_deal_notes",
+                        "property": "default",
+                        "value": "eval:frappe.session.user",
+                    }
+                ],
+            })
+        self.assertIn("No-Generated-Code Rule Violation", str(ctx_eval_default.exception))
+
+        # 5. Extra key 'depends_on' smuggled inside add_custom_fields change dict
+        with self.assertRaises(ZoneSafetyViolation) as ctx_cf_depends:
+            validate_mutation_safety({
+                "intent": "add_custom_fields",
+                "target_doctype": "Sales Order",
+                "user_roles": ["System Manager"],
+                "changes": [
+                    {
+                        "fieldname": "custom_secret_flag",
+                        "label": "Secret Flag",
+                        "fieldtype": "Data",
+                        "depends_on": "eval:doc.grand_total > 100",
+                    }
+                ],
+            })
+        self.assertIn("No-Generated-Code Rule Violation", str(ctx_cf_depends.exception))
+
+        # 6. Unknown arbitrary extra key in add_custom_fields change dict
+        with self.assertRaises(ZoneSafetyViolation) as ctx_cf_extra:
+            validate_mutation_safety({
+                "intent": "add_custom_fields",
+                "target_doctype": "Sales Order",
+                "user_roles": ["System Manager"],
+                "changes": [
+                    {
+                        "fieldname": "custom_secret_flag",
+                        "label": "Secret Flag",
+                        "fieldtype": "Data",
+                        "unexpected_extra_key": "malicious_value",
+                    }
+                ],
+            })
+        self.assertIn("Unapproved Field Property Violation", str(ctx_cf_extra.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

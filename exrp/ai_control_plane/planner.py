@@ -9,7 +9,7 @@ import os
 import re
 import json
 from typing import Dict, Any, List, Optional, Literal, Union, Callable
-from pydantic import BaseModel, Field, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, Field, ConfigDict, ValidationError, field_validator, model_validator
 
 try:
     import frappe
@@ -23,6 +23,9 @@ from exrp.ai_control_plane.safety_guardrails import (
     ZONE_2_LOCKED_DOCTYPES,
     PROTECTED_STANDARD_FIELDS,
     PHASE_1_ALLOWED_FIELDTYPES,
+    ALLOWED_PROPERTY_SETTER_PROPERTIES,
+    PROHIBITED_CODE_PROPERTIES,
+    PROHIBITED_EXPRESSION_PATTERNS,
 )
 from exrp.ai_control_plane.ddl_plan_gate import (
     inspect_frappe_ddl_plan,
@@ -33,8 +36,10 @@ from exrp.ai_control_plane.ddl_plan_gate import (
 class ProposedFieldChange(BaseModel):
     """
     Proposed single custom field definition adhering to ADR-001 Rev 2.3 §5.1.
+    Strictly forbids extra keys (e.g. depends_on, mandatory_depends_on, fetch_from)
+    and rejects executable code expressions (eval:, javascript:, <script).
     """
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     fieldname: str = Field(
         ...,
@@ -65,13 +70,78 @@ class ProposedFieldChange(BaseModel):
             return v.strip().lower()
         return str(v)
 
+    @model_validator(mode="after")
+    def reject_executable_expressions(self) -> "ProposedFieldChange":
+        for attr in ("label", "options", "description", "insert_after", "default"):
+            val = getattr(self, attr, None)
+            if isinstance(val, str) and PROHIBITED_EXPRESSION_PATTERNS.search(val):
+                raise ValueError(
+                    f"No-Generated-Code Rule Violation (PRD-001): Executable expression or 'eval:' in '{attr}' is prohibited."
+                )
+        return self
+
+    def __getitem__(self, item: str) -> Any:
+        return getattr(self, item)
+
+    def get(self, item: str, default: Any = None) -> Any:
+        return getattr(self, item, default)
+
+
+class ProposedPropertyChange(BaseModel):
+    """
+    Proposed single field property mutation adhering to ADR-001 Rev 2.3 §5.
+    Strictly forbids extra keys and rejects unapproved properties (e.g. depends_on)
+    or executable code expressions (eval:).
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    fieldname: str = Field(..., description="Target fieldname on the DocType")
+    property: Optional[str] = Field(
+        default=None,
+        description="Approved property name from ALLOWED_PROPERTY_SETTER_PROPERTIES"
+    )
+    property_name: Optional[str] = Field(
+        default=None,
+        description="Optional alias for 'property'"
+    )
+    value: Any = Field(..., description="New declarative value for the property")
+    property_type: Optional[str] = Field(
+        default=None,
+        description="Frappe property type (Data, Text, Check)"
+    )
+
+    @model_validator(mode="after")
+    def validate_property_and_value(self) -> "ProposedPropertyChange":
+        eff_prop = self.property if self.property is not None else self.property_name
+        if not eff_prop or not isinstance(eff_prop, str):
+            raise ValueError("Property mutation requires a non-empty 'property' name.")
+        if eff_prop.strip().lower() in PROHIBITED_CODE_PROPERTIES:
+            raise ValueError(
+                f"No-Generated-Code Rule Violation (PRD-001): Property '{eff_prop}' is strictly prohibited."
+            )
+        if eff_prop not in ALLOWED_PROPERTY_SETTER_PROPERTIES:
+            raise ValueError(
+                f"Unapproved Field Property Violation (§5): Property '{eff_prop}' is not in the allowlist {sorted(ALLOWED_PROPERTY_SETTER_PROPERTIES)}."
+            )
+        if isinstance(self.value, str) and PROHIBITED_EXPRESSION_PATTERNS.search(self.value):
+            raise ValueError(
+                f"No-Generated-Code Rule Violation (PRD-001): Executable expression or 'eval:' in value is prohibited."
+            )
+        return self
+
+    def __getitem__(self, item: str) -> Any:
+        return getattr(self, item)
+
+    def get(self, item: str, default: Any = None) -> Any:
+        return getattr(self, item, default)
+
 
 class ConfigurationProposal(BaseModel):
     """
     Declarative configuration change proposal produced by the AI Planner.
     Adheres strictly to ADR-001 Rev 2.3 §5.
     """
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     intent: Literal[
         "add_custom_fields",
@@ -87,7 +157,7 @@ class ConfigurationProposal(BaseModel):
     target_doctype: str = Field(..., description="Target DocType being configured")
     summary: str = Field(..., description="High-level description of proposed change")
     reasoning: str = Field(..., description="Design rationale and justification for change")
-    changes: List[Union[ProposedFieldChange, Dict[str, Any]]] = Field(
+    changes: List[Union[ProposedFieldChange, ProposedPropertyChange, Dict[str, Any]]] = Field(
         default_factory=list,
         description="Proposed change items. Max 1 field in Phase 1 for add_custom_fields."
     )
@@ -103,6 +173,33 @@ class ConfigurationProposal(BaseModel):
         default=1,
         description="Governance Tier (0=Immutable Invariant, 1=Governed Policy, 2=Ordinary Config)"
     )
+
+    @model_validator(mode="after")
+    def validate_changes_strictly_by_intent(self) -> "ConfigurationProposal":
+        if self.intent == "add_custom_fields":
+            validated_changes: List[Any] = []
+            for item in self.changes:
+                if isinstance(item, ProposedFieldChange):
+                    validated_changes.append(item)
+                elif isinstance(item, dict):
+                    validated_changes.append(ProposedFieldChange.model_validate(item))
+                else:
+                    validated_changes.append(ProposedFieldChange.model_validate(item.model_dump() if hasattr(item, "model_dump") else item))
+            self.changes = validated_changes
+        elif self.intent == "set_property":
+            validated_props: List[Any] = []
+            for item in self.changes:
+                if isinstance(item, ProposedPropertyChange):
+                    validated_props.append(item.model_dump(exclude_none=True))
+                elif isinstance(item, dict):
+                    validated_prop = ProposedPropertyChange.model_validate(item)
+                    validated_props.append(validated_prop.model_dump(exclude_none=True))
+                else:
+                    raw = item.model_dump(exclude_none=True) if hasattr(item, "model_dump") else dict(item)
+                    validated_prop = ProposedPropertyChange.model_validate(raw)
+                    validated_props.append(validated_prop.model_dump(exclude_none=True))
+            self.changes = validated_props
+        return self
 
     @field_validator("workflow", mode="before")
     @classmethod
@@ -735,6 +832,8 @@ class AIConfigurationPlanner:
             "   - Reports are strictly PROHIBITED on system internal / Tier 0 locked DocTypes (e.g. User, Role, DocType, Custom Field, Property Setter, Workflow, GL Entry).\n"
             "10. For field deletion, removal, hiding, soft-quarantine, or property mutation:\n"
             "   - Under ADR-001 Rev 2.3 (§9.1), physical column drops (ALTER TABLE ... DROP COLUMN) are strictly PROHIBITED during conversational execution to prevent data loss.\n"
+            "   - Allowed properties for 'set_property' (strict allowlist): label, description, insert_after, in_list_view, in_standard_filter, bold, collapsible, default, read_only, reqd, options, hidden.\n"
+            "   - No-Generated-Code Rule (PRD-001): Properties such as 'depends_on', 'mandatory_depends_on', 'read_only_depends_on', 'fetch_from', and any 'eval:' or JavaScript expressions are strictly PROHIBITED.\n"
             "   - When the user asks to delete, remove, hide, or quarantine an existing custom field (or non-invariant standard field):\n"
             "     * Set intent to 'set_property'.\n"
             "     * In 'changes', output a single dict: {'fieldname': '<existing_fieldname>', 'property': 'hidden', 'value': 1, 'property_type': 'Check'}.\n"
