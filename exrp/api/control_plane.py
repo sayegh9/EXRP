@@ -487,6 +487,18 @@ class FrappeDeploymentAdapter:
         if not self.in_memory:
             table_name = f"tab{doctype}"
             try:
+                if hasattr(self._frappe, "db") and hasattr(self._frappe.db, "get_table_columns_description"):
+                    raw_cols = self._frappe.db.get_table_columns_description(table_name)
+                    return [
+                        ColumnDesc(
+                            name=c["name"] if isinstance(c, dict) else getattr(c, "name"),
+                            type=c["type"] if isinstance(c, dict) else getattr(c, "type"),
+                            default=c.get("default") if isinstance(c, dict) else getattr(c, "default", None),
+                            index=int(c.get("index", 0) if isinstance(c, dict) else getattr(c, "index", 0)),
+                            unique=int(c.get("unique", 0) if isinstance(c, dict) else getattr(c, "unique", 0)),
+                        )
+                        for c in raw_cols
+                    ]
                 res = self._frappe.db.sql(
                     """
                     SELECT COLUMN_NAME, COLUMN_TYPE, COLUMN_DEFAULT
