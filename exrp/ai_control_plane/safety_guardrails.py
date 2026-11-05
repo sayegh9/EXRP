@@ -58,6 +58,7 @@ ZONE_2_LOCKED_DOCTYPES: Set[str] = {
     "User",
     "Role",
     "System Settings",
+    "EXRP Settings",
 }
 
 PROTECTED_STANDARD_FIELDS: Set[str] = {

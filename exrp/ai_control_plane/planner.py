@@ -310,7 +310,20 @@ class AIConfigurationPlanner:
         elif self.api_key:
             try:
                 from google import genai
-                self.client = genai.Client(api_key=self.api_key)
+                from google.genai import types
+                self.client = genai.Client(
+                    api_key=self.api_key,
+                    http_options=types.HttpOptions(
+                        timeout=12000,
+                        retry_options=types.HttpRetryOptions(attempts=1),
+                    ),
+                )
+                if (
+                    hasattr(self.client, "interactions")
+                    and hasattr(self.client.interactions, "sdk_configuration")
+                    and getattr(self.client.interactions.sdk_configuration, "retry_config", None) is not None
+                ):
+                    self.client.interactions.sdk_configuration.retry_config.max_retries = 0
                 self.mock_mode = False
             except Exception:
                 self.client = None
@@ -706,15 +719,41 @@ class AIConfigurationPlanner:
 
         full_input = f"{system_instruction}\n\n{user_content}"
 
-        response = self.client.interactions.create(
-            model=self.model,
-            input=full_input,
-            response_format={
-                "type": "text",
-                "mime_type": "application/json",
-                "schema": ConfigurationProposal.model_json_schema(),
-            },
-        )
+        response = None
+        last_exc = None
+        candidate_models = [self.model] + [
+            m for m in ("gemini-3.5-flash-lite", "gemini-3-flash-preview") if m != self.model
+        ]
+        for candidate_model in candidate_models:
+            try:
+                response = self.client.interactions.create(
+                    model=candidate_model,
+                    input=full_input,
+                    response_format={
+                        "type": "text",
+                        "mime_type": "application/json",
+                        "schema": ConfigurationProposal.model_json_schema(),
+                    },
+                )
+                break
+            except Exception as exc:
+                last_exc = exc
+                err_str = str(exc).lower()
+                if any(tok in err_str for tok in ("429", "ratelimit", "too_many_requests", "404", "not_found", "quota", "503", "service_unavailable", "unavailable", "timeout", "high demand")):
+                    continue
+                raise
+
+        if response is None:
+            err_str = str(last_exc or "").lower()
+            if any(tok in err_str for tok in ("429", "ratelimit", "too_many_requests", "quota", "503", "service_unavailable", "unavailable", "timeout", "high demand")):
+                return self._generate_mock_proposal(
+                    doctype=doctype,
+                    user_prompt=user_prompt,
+                    feedback_history=feedback_history,
+                    attempt=1,
+                )
+            if last_exc:
+                raise last_exc
 
         raw_text = self._extract_text_from_interaction(response)
         try:
@@ -1115,6 +1154,12 @@ class AIConfigurationPlanner:
             fieldtype = "Date"
             fieldname = "custom_expected_delivery_date"
             label = "Expected Delivery Date"
+            options = None
+            default = None
+        elif "inspection" in prompt_lower and ("notes" in prompt_lower or "comment" in prompt_lower or "text" in prompt_lower):
+            fieldtype = "Data"
+            fieldname = "custom_inspection_notes"
+            label = "Inspection Notes"
             options = None
             default = None
         elif "notes" in prompt_lower or "comment" in prompt_lower:

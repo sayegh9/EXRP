@@ -157,9 +157,21 @@
 
         <!-- DocType Context Bar -->
         <div class="exrp-context-bar">
-          <div class="exrp-context-doctype">
+          <div class="exrp-context-doctype" style="display: flex; align-items: center; gap: 6px;">
             <span class="exrp-context-indicator" id="exrp-context-indicator"></span>
-            <span id="exrp-context-doctype-text">No active form</span>
+            <span id="exrp-context-doctype-text" style="display: none;">Sales Order</span>
+            <select id="exrp-target-doctype-select" title="Select target DocType to customize" style="font-size: 12px; font-weight: 600; padding: 2px 6px; border-radius: 5px; border: 1px solid var(--border-color, #d1d5db); background: var(--control-bg, #f9fafb); color: var(--text-color, #111827); cursor: pointer;">
+              <option value="Sales Order">Sales Order</option>
+              <option value="Customer">Customer</option>
+              <option value="Delivery Note">Delivery Note</option>
+              <option value="Quotation">Quotation</option>
+              <option value="Item">Item</option>
+              <option value="ToDo">ToDo</option>
+              <option value="Note">Note</option>
+              <option value="Contact">Contact</option>
+              <option value="Address">Address</option>
+            </select>
+            <button type="button" id="exrp-btn-open-target-doctype" title="Open selected DocType in Desk" style="font-size: 10.5px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border-color, #d1d5db); background: transparent; color: var(--primary, #2563eb); cursor: pointer; font-weight: 500;">Open ↗</button>
           </div>
           <div class="exrp-custom-field-count" id="exrp-context-count">
             0 custom fields
@@ -198,8 +210,10 @@
       this.inputEl = this.drawerEl.querySelector('#exrp-prompt-input');
       this.sendBtnEl = this.drawerEl.querySelector('#exrp-send-btn');
       this.contextDocTypeEl = this.drawerEl.querySelector('#exrp-context-doctype-text');
+      this.targetDocTypeSelectEl = this.drawerEl.querySelector('#exrp-target-doctype-select');
       this.contextCountEl = this.drawerEl.querySelector('#exrp-context-count');
       this.headerDocTypeEl = this.drawerEl.querySelector('#exrp-header-doctype-badge');
+      this.selectedTargetDocType = 'Sales Order';
     }
 
     /**
@@ -210,6 +224,30 @@
       this.launcherEl.addEventListener('click', () => this.toggle());
       this.backdropEl.addEventListener('click', () => this.close());
       this.drawerEl.querySelector('#exrp-btn-close').addEventListener('click', () => this.close());
+
+      // Target DocType Selector
+      if (this.targetDocTypeSelectEl) {
+        this.targetDocTypeSelectEl.addEventListener('change', (e) => {
+          const newDt = e.target.value;
+          if (newDt) {
+            this.selectedTargetDocType = newDt;
+            this.activeDocType = newDt;
+            this.clearInPlaceFormPreview();
+            this.updateContext();
+            this.appendSystemNotice(`Target DocType set to <strong>${escapeHtml(newDt)}</strong>.`);
+          }
+        });
+      }
+
+      const openTargetBtn = this.drawerEl.querySelector('#exrp-btn-open-target-doctype');
+      if (openTargetBtn) {
+        openTargetBtn.addEventListener('click', () => {
+          const dt = this.activeDocType || this.selectedTargetDocType || 'Sales Order';
+          if (window.frappe && typeof window.frappe.set_route === 'function') {
+            window.frappe.set_route('List', dt);
+          }
+        });
+      }
 
       // Keyboard Esc to close
       document.addEventListener('keydown', (e) => {
@@ -309,19 +347,51 @@
     }
 
     /**
-     * Resolves currently active DocType from cur_frm or frappe.router
+     * Returns true if the given DocType is an internal system or Single DocType
+     * that should not overwrite the Copilot's target business DocType.
+     */
+    isNonCustomizableContextDocType(dt) {
+      if (!dt) return true;
+      const systemTypes = new Set([
+        'EXRP Settings',
+        'System Settings',
+        'DocType',
+        'Custom Field',
+        'Property Setter',
+        'Workflow',
+        'Workflow State',
+        'Workflow Action',
+        'Report',
+        'Workspace',
+        'Module Def',
+      ]);
+      if (systemTypes.has(dt)) return true;
+      if (window.cur_frm && window.cur_frm.doctype === dt && window.cur_frm.meta && window.cur_frm.meta.issingle) {
+        return true;
+      }
+      return false;
+    }
+
+    /**
+     * Resolves currently active DocType from cur_frm or frappe.router,
+     * falling back to the user-selected target business DocType when viewing
+     * system pages like EXRP Settings or Desk Workspaces.
      */
     getActiveDocType() {
+      let pageDt = null;
       if (window.cur_frm && window.cur_frm.doctype) {
-        return window.cur_frm.doctype;
-      }
-      if (window.frappe && typeof window.frappe.get_route === 'function') {
+        pageDt = window.cur_frm.doctype;
+      } else if (window.frappe && typeof window.frappe.get_route === 'function') {
         const route = window.frappe.get_route();
-        if (route && route[0] === 'Form' && route[1]) {
-          return route[1];
+        if (route && (route[0] === 'Form' || route[0] === 'List') && route[1]) {
+          pageDt = route[1];
         }
       }
-      return null;
+      if (pageDt && !this.isNonCustomizableContextDocType(pageDt)) {
+        this.selectedTargetDocType = pageDt;
+        return pageDt;
+      }
+      return this.selectedTargetDocType || 'Sales Order';
     }
 
     /**
@@ -351,6 +421,16 @@
       if (dt) {
         this.contextDocTypeEl.textContent = dt;
         this.headerDocTypeEl.textContent = dt;
+        if (this.targetDocTypeSelectEl) {
+          const exists = Array.from(this.targetDocTypeSelectEl.options).some((opt) => opt.value === dt);
+          if (!exists) {
+            const newOpt = document.createElement('option');
+            newOpt.value = dt;
+            newOpt.textContent = dt;
+            this.targetDocTypeSelectEl.appendChild(newOpt);
+          }
+          this.targetDocTypeSelectEl.value = dt;
+        }
         this.contextCountEl.textContent = `${this.customFieldCount} custom field${this.customFieldCount === 1 ? '' : 's'}`;
         indicator.classList.remove('exrp-indicator-inactive');
 
@@ -964,15 +1044,22 @@
       const tier = validation.governance_tier || (isSuccess ? 'TIER_1_GOVERNED_POLICY' : 'TIER_0_IMMUTABLE_INVARIANT');
       const storageImpact = validation.storage_impact || 'ONLINE_ADDITIVE_DDL';
       const isApproved = isSuccess && validation.status !== 'rejected';
+      const isDdlApproved = ddlPlan.is_approved_additive_only !== false && isApproved;
 
       const tierBadgeHtml = isApproved
         ? `<span class="exrp-gate-badge approved">✓ Approved (${tier === 'TIER_1_GOVERNED_POLICY' ? 'Tier 1 Governed Policy' : 'Tier 2 Ordinary Config'})</span>`
         : `<span class="exrp-gate-badge rejected">✕ Rejected (${tier === 'TIER_0_IMMUTABLE_INVARIANT' ? 'Tier 0 Invariant' : 'Policy Gate'})</span>`;
 
+      const ddlBadgeHtml = isDdlApproved
+        ? `<span class="exrp-ddl-badge">Safe Additive DDL</span>`
+        : `<span class="exrp-ddl-badge" style="background: rgba(239, 68, 68, 0.18); color: #f87171;">Rejected by Gate</span>`;
+
       // SQL statements
       const sqlStatements = (ddlPlan.statements && ddlPlan.statements.length > 0)
         ? ddlPlan.statements.join(';\n') + ';'
-        : (fieldDef.fieldname ? `ALTER TABLE \`tab${doctype}\` ADD COLUMN \`${fieldDef.fieldname}\` varchar(140) NULL;` : '-- No physical DDL required --');
+        : (ddlPlan.rejection_reason
+          ? `-- ${ddlPlan.rejection_reason}`
+          : (fieldDef.fieldname ? `ALTER TABLE \`tab${doctype}\` ADD COLUMN \`${fieldDef.fieldname}\` varchar(140) NULL;` : '-- No physical DDL required --'));
 
       // Table rows for proposed fields
       let tableRows = '';
@@ -1058,7 +1145,7 @@
                 <div class="exrp-ddl-header">
                   <span class="exrp-ddl-title">DDL Plan Gate Inspection</span>
                   <div style="display: flex; align-items: center; gap: 6px;">
-                    <span class="exrp-ddl-badge">Safe Additive DDL</span>
+                    ${ddlBadgeHtml}
                     <button type="button" class="exrp-chip-btn exrp-ddl-copy-btn" data-sql="${escapeHtml(sqlStatements)}" style="padding: 1px 6px; font-size: 10px;">Copy</button>
                   </div>
                 </div>

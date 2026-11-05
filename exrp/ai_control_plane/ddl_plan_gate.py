@@ -385,6 +385,17 @@ def _inspect_with_frappe_mariadb_table(
         if not (hasattr(frappe, "db") and frappe.db is not None and hasattr(frappe.db, "sql_ddl")):
             return None
 
+        if existing_columns_desc is None:
+            if hasattr(frappe, "get_meta"):
+                try:
+                    dt_meta = frappe.get_meta(doctype)
+                    if getattr(dt_meta, "issingle", 0):
+                        return None
+                except Exception:
+                    pass
+            if hasattr(frappe.db, "table_exists") and not frappe.db.table_exists(doctype):
+                return None
+
         table = MariaDBTable(doctype)
 
         if existing_columns_desc is not None:
@@ -528,6 +539,29 @@ def inspect_frappe_ddl_plan(
             statements=[],
             is_approved_additive_only=False,
             rejection_reason="Invalid field_def: missing 'fieldname'",
+        )
+
+    is_single_dt = doctype in ("EXRP Settings", "System Settings") or bool(getattr(meta, "issingle", 0))
+    if not is_single_dt:
+        try:
+            import frappe
+            if hasattr(frappe, "db") and frappe.db is not None and hasattr(frappe, "get_meta"):
+                dt_meta = frappe.get_meta(doctype)
+                if getattr(dt_meta, "issingle", 0):
+                    is_single_dt = True
+        except Exception:
+            pass
+
+    if is_single_dt:
+        return DDLPlanInspection(
+            inspectable=False,
+            statements=[],
+            is_approved_additive_only=False,
+            rejection_reason=(
+                f"DocType '{doctype}' is a Single DocType (stored in tabSingles) and does not "
+                "have a physical database table. Please target a standard transactional DocType "
+                "(e.g., Sales Order, Customer, or ToDo)."
+            ),
         )
 
     # Try Frappe-native inspection first if full environment is available

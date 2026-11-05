@@ -43,6 +43,15 @@ cd /home/frappe/frappe-bench/sites
 ln -sfn ${SITE_NAME} localhost 2>/dev/null || true
 ln -sfn ${SITE_NAME} 127.0.0.1 2>/dev/null || true
 
+# 5. Ensure demo ERP DocTypes & sample records exist
+/home/frappe/frappe-bench/env/bin/python -c "
+import frappe
+frappe.init(site='${SITE_NAME}')
+frappe.connect()
+from exrp.setup_demo_doctypes import ensure_demo_erp_doctypes
+ensure_demo_erp_doctypes()
+" 2>/dev/null || true
+
 echo "=== Launching Frappe Gunicorn with Statics on 0.0.0.0:8000 (Mapped to 8088 on Host) ==="
 exec /home/frappe/frappe-bench/env/bin/gunicorn \
   --chdir=/home/frappe/frappe-bench/apps/exrp/docker \
