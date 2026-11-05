@@ -97,6 +97,24 @@
       this.updateContext();
       this.renderWelcomeMessage();
 
+      // Observer for real-time theme changes on documentElement
+      if (typeof MutationObserver !== 'undefined') {
+        const themeObserver = new MutationObserver(() => {
+          this.syncNavbarLogo();
+          this.updateThemeUIState();
+        });
+        themeObserver.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['data-theme', 'data-theme-mode', 'class'],
+        });
+      }
+
+      // Fast periodic check to ensure navbar theme toggle and logo are always attached
+      setInterval(() => {
+        this.setupNavbarThemeToggle();
+        this.syncNavbarLogo();
+      }, 400);
+
       // Hook into Frappe navigation and form events
       if (window.frappe && window.frappe.router && typeof window.frappe.router.on === 'function') {
         window.frappe.router.on('change', () => this.onRouteOrContextChange());
@@ -105,6 +123,10 @@
       if (typeof window.$ !== 'undefined') {
         window.$(document).on('page-change', () => this.onRouteOrContextChange());
         window.$(document).on('form-refresh', () => this.onRouteOrContextChange());
+        window.$(document).on('toolbar_setup', () => {
+          this.setupNavbarThemeToggle();
+          this.syncNavbarLogo();
+        });
       }
 
       // Context polling fallback for SPA switches
@@ -525,13 +547,21 @@
      * Injects or refreshes the 1-click Dark/Light Mode toggle in the Frappe Desk Navbar
      */
     setupNavbarThemeToggle() {
-      if (document.getElementById('exrp-navbar-theme-toggle')) {
-        this.updateThemeUIState();
+      // Find the action bar navbar-nav on the right
+      const navbarNav = (
+        document.querySelector('.collapse.navbar-collapse .navbar-nav') ||
+        document.querySelector('.navbar-collapse ul.navbar-nav') ||
+        document.querySelector('.dropdown-navbar-user')?.closest('ul') ||
+        document.querySelector('.dropdown-help')?.closest('ul') ||
+        document.querySelectorAll('header .navbar ul.navbar-nav')[1]
+      );
+
+      if (!navbarNav) {
         return;
       }
 
-      const navbarNav = document.querySelector('header .navbar ul.navbar-nav');
-      if (!navbarNav) {
+      if (document.getElementById('exrp-navbar-theme-toggle')) {
+        this.updateThemeUIState();
         return;
       }
 
@@ -642,14 +672,23 @@
      */
     syncNavbarLogo() {
       const isDark = this.isDarkModeActive();
-      const logoImgs = document.querySelectorAll('.navbar .app-logo, .navbar-brand .app-logo');
+      const targetLogo = isDark ? '/assets/exrp/images/exrp-logo-dark.png' : '/assets/exrp/images/exrp-logo.svg';
+
+      const logoImgs = document.querySelectorAll('.navbar .app-logo, .navbar-brand .app-logo, img.app-logo, .navbar-home img');
       logoImgs.forEach(img => {
-        img.src = isDark ? '/assets/exrp/images/exrp-logo-dark.png' : '/assets/exrp/images/exrp-logo.svg';
+        if (img.getAttribute('src') !== targetLogo) {
+          img.setAttribute('src', targetLogo);
+          img.src = targetLogo;
+        }
       });
 
       const symbolImgs = document.querySelectorAll('.exrp-brand-symbol-img');
       symbolImgs.forEach(img => {
-        img.src = isDark ? '/assets/exrp/images/exrp-symbol-dark.svg' : '/assets/exrp/images/exrp-symbol.svg';
+        const symbolTarget = isDark ? '/assets/exrp/images/exrp-symbol-dark.svg' : '/assets/exrp/images/exrp-symbol.svg';
+        if (img.getAttribute('src') !== symbolTarget) {
+          img.setAttribute('src', symbolTarget);
+          img.src = symbolTarget;
+        }
       });
     }
 

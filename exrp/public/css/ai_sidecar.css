@@ -84,10 +84,27 @@ body.dark,
   transition: opacity 0.2s ease;
 }
 
+[data-theme="dark"] .navbar-brand .app-logo,
 [data-theme="dark"] .navbar .app-logo,
+[data-theme="dark"] img.app-logo,
+[data-theme="dark"] .navbar-home img,
+[data-theme-mode="dark"] .navbar-brand .app-logo,
 [data-theme-mode="dark"] .navbar .app-logo,
-body.dark .navbar .app-logo {
+[data-theme-mode="dark"] img.app-logo,
+[data-theme-mode="dark"] .navbar-home img,
+body.dark .navbar-brand .app-logo,
+body.dark .navbar .app-logo,
+body.dark img.app-logo,
+body.dark .navbar-home img {
   content: url("/assets/exrp/images/exrp-logo-dark.png") !important;
+  object-position: -99999px 50% !important;
+  background-image: url("/assets/exrp/images/exrp-logo-dark.png") !important;
+  background-repeat: no-repeat !important;
+  background-position: left center !important;
+  background-size: contain !important;
+  min-width: 108px !important;
+  height: 28px !important;
+  display: inline-block !important;
 }
 
 [data-theme="light"] .navbar .app-logo,
