@@ -180,6 +180,10 @@
                 <option value="Warehouse">Warehouse</option>
                 <option value="Stock Ledger Entry">Stock Ledger Entry (Tier 0)</option>
               </optgroup>
+              <optgroup label="Manufacturing & Production">
+                <option value="Work Order">Work Order</option>
+                <option value="BOM">BOM</option>
+              </optgroup>
               <optgroup label="Finance & Accounting">
                 <option value="Payment Entry">Payment Entry</option>
                 <option value="Sales Invoice">Sales Invoice (Tier 0)</option>
@@ -189,6 +193,14 @@
                 <option value="Expense Claim">Expense Claim</option>
                 <option value="Project">Project</option>
                 <option value="Employee">Employee</option>
+              </optgroup>
+              <optgroup label="Support & Helpdesk">
+                <option value="Issue">Issue</option>
+                <option value="Warranty Claim">Warranty Claim</option>
+              </optgroup>
+              <optgroup label="Settings & System">
+                <option value="EXRP Settings">EXRP Settings</option>
+                <option value="System Settings">System Settings</option>
               </optgroup>
             </select>
             <button type="button" id="exrp-btn-open-target-doctype" title="Open selected DocType in Desk" style="font-size: 10.5px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border-color, #d1d5db); background: transparent; color: var(--primary, #2563eb); cursor: pointer; font-weight: 500;">Open ↗</button>

@@ -1,0 +1,84 @@
+{
+ "charts": [],
+ "content": "[{\"id\": \"hdr_sc_Suppor\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Quick Access & Live Counts</b></span>\", \"col\": 12}}, {\"id\": \"sc_0_Support_\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Support Issues\", \"col\": 3}}, {\"id\": \"sc_1_Warranty\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Warranty Claims\", \"col\": 3}}, {\"id\": \"spc_main\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"hdr_cards\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>ERP Modules & Masters</b></span>\", \"col\": 12}}, {\"id\": \"crd_0_Customer\", \"type\": \"card\", \"data\": {\"card_name\": \"Customer Support\", \"col\": 4}}]",
+ "creation": "2026-11-05 16:03:33.875704",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "hide_custom": 0,
+ "icon": "support",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Support and Helpdesk",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Customer Support",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Issue",
+   "link_count": 0,
+   "link_to": "Issue",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Warranty Claim",
+   "link_count": 0,
+   "link_to": "Warranty Claim",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Customer",
+   "link_count": 0,
+   "link_to": "Customer",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-11-05 16:03:33.875704",
+ "modified_by": "Administrator",
+ "module": "EXRP",
+ "name": "Support and Helpdesk",
+ "number_cards": [],
+ "owner": "Administrator",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 0.8,
+ "shortcuts": [
+  {
+   "color": "Red",
+   "doc_view": "List",
+   "label": "Support Issues",
+   "link_to": "Issue",
+   "stats_filter": "{}",
+   "type": "DocType"
+  },
+  {
+   "color": "Orange",
+   "doc_view": "List",
+   "label": "Warranty Claims",
+   "link_to": "Warranty Claim",
+   "stats_filter": "{}",
+   "type": "DocType"
+  }
+ ],
+ "title": "Support and Helpdesk"
+}

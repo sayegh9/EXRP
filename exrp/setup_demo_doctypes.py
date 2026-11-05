@@ -404,6 +404,74 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
                 {"fieldname": "percent_complete", "label": "Completion (%)", "fieldtype": "Int", "default": "25"},
             ],
         },
+        # --- Manufacturing & Production ---
+        {
+            "name": "BOM",
+            "is_submittable": 1,
+            "autoname": "format:BOM-{####}",
+            "title_field": "item",
+            "permissions": submittable_perms,
+            "fields": [
+                {"fieldname": "item", "label": "Finished Item", "fieldtype": "Data", "reqd": 1, "in_list_view": 1},
+                {"fieldname": "quantity", "label": "Output Quantity", "fieldtype": "Float", "default": "1", "reqd": 1, "in_list_view": 1},
+                {"fieldname": "is_active", "label": "Is Active", "fieldtype": "Check", "default": "1", "in_list_view": 1},
+                {"fieldname": "is_default", "label": "Is Default BOM", "fieldtype": "Check", "default": "1"},
+                {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+                {"fieldname": "total_cost", "label": "Estimated Unit Cost", "fieldtype": "Currency", "default": "1500", "in_list_view": 1},
+                {"fieldname": "currency", "label": "Currency", "fieldtype": "Data", "default": "USD"},
+            ],
+        },
+        {
+            "name": "Work Order",
+            "is_submittable": 1,
+            "autoname": "format:MFG-WO-2026-{####}",
+            "title_field": "production_item",
+            "permissions": submittable_perms,
+            "fields": [
+                {"fieldname": "production_item", "label": "Item to Produce", "fieldtype": "Data", "reqd": 1, "in_list_view": 1},
+                {"fieldname": "qty", "label": "Qty to Produce", "fieldtype": "Float", "default": "10", "reqd": 1, "in_list_view": 1},
+                {"fieldname": "bom_no", "label": "BOM Reference", "fieldtype": "Data", "in_list_view": 1},
+                {"fieldname": "status", "label": "Status", "fieldtype": "Select", "options": "Draft\nNot Started\nIn Process\nCompleted\nStopped\nCancelled", "default": "In Process", "in_list_view": 1},
+                {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+                {"fieldname": "planned_start_date", "label": "Planned Start Date", "fieldtype": "Date", "default": "Today", "in_list_view": 1},
+                {"fieldname": "target_warehouse", "label": "Destination Warehouse", "fieldtype": "Data", "default": "Rotterdam Hub"},
+                {"fieldname": "produced_qty", "label": "Produced Qty", "fieldtype": "Float", "default": "0"},
+            ],
+        },
+        # --- Support & Customer Success ---
+        {
+            "name": "Issue",
+            "is_submittable": 0,
+            "autoname": "format:ISS-2026-{####}",
+            "title_field": "subject",
+            "permissions": master_perms,
+            "fields": [
+                {"fieldname": "subject", "label": "Issue Subject", "fieldtype": "Data", "reqd": 1, "in_list_view": 1},
+                {"fieldname": "customer", "label": "Customer", "fieldtype": "Data", "reqd": 1, "in_list_view": 1},
+                {"fieldname": "status", "label": "Status", "fieldtype": "Select", "options": "Open\nReplied\nOn Hold\nResolved\nClosed", "default": "Open", "in_list_view": 1},
+                {"fieldname": "priority", "label": "Priority", "fieldtype": "Select", "options": "Low\nMedium\nHigh\nUrgent", "default": "Medium", "in_list_view": 1},
+                {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+                {"fieldname": "issue_type", "label": "Issue Category", "fieldtype": "Select", "options": "Hardware Fault\nFirmware Telemetry\nLate Shipment\nBilling Dispute\nSLA Breach", "default": "Hardware Fault", "in_list_view": 1},
+                {"fieldname": "opening_date", "label": "Reported Date", "fieldtype": "Date", "default": "Today"},
+                {"fieldname": "resolution_time", "label": "Target SLA (Hours)", "fieldtype": "Int", "default": "24"},
+            ],
+        },
+        {
+            "name": "Warranty Claim",
+            "is_submittable": 1,
+            "autoname": "format:WC-2026-{####}",
+            "title_field": "customer",
+            "permissions": submittable_perms,
+            "fields": [
+                {"fieldname": "customer", "label": "Customer", "fieldtype": "Data", "reqd": 1, "in_list_view": 1},
+                {"fieldname": "item_code", "label": "Serialized Item", "fieldtype": "Data", "reqd": 1, "in_list_view": 1},
+                {"fieldname": "claim_date", "label": "Claim Date", "fieldtype": "Date", "default": "Today", "reqd": 1, "in_list_view": 1},
+                {"fieldname": "status", "label": "Status", "fieldtype": "Select", "options": "Draft\nOpen\nUnder Inspection\nApproved\nRejected\nCancelled", "default": "Open", "in_list_view": 1},
+                {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+                {"fieldname": "resolution_type", "label": "Proposed Resolution", "fieldtype": "Select", "options": "Replacement Unit\nBoard Repair\nFull Refund\nCredit Memo", "default": "Replacement Unit", "in_list_view": 1},
+                {"fieldname": "claim_amount", "label": "Claim Value", "fieldtype": "Currency", "default": "1850"},
+            ],
+        },
     ]
 
     for spec in doctype_specs:
@@ -875,9 +943,69 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
             d.insert(ignore_permissions=True)
             seeded_records.append(f"Project:{d.name}")
 
+    # 22. Seed Manufacturing records (BOM and Work Order)
+    if frappe.db.count("BOM") == 0:
+        sample_boms = [
+            {"item": "SKU-IOT-400", "quantity": 1, "is_active": 1, "is_default": 1, "total_cost": 1120, "currency": "USD"},
+            {"item": "SKU-RACK-9U", "quantity": 1, "is_active": 1, "is_default": 1, "total_cost": 2950, "currency": "USD"},
+            {"item": "SKU-DRONE-INV", "quantity": 1, "is_active": 1, "is_default": 1, "total_cost": 9400, "currency": "USD"},
+            {"item": "SKU-PLC-X8", "quantity": 1, "is_active": 1, "is_default": 1, "total_cost": 1950, "currency": "USD"},
+        ]
+        for bom in sample_boms:
+            d = frappe.get_doc({"doctype": "BOM", **bom})
+            d.insert(ignore_permissions=True)
+            d.submit()
+            seeded_records.append(f"BOM:{d.name}")
+
+    if frappe.db.count("Work Order") == 0:
+        boms = [r.name for r in frappe.get_all("BOM", limit=4)]
+        sample_wos = [
+            {"production_item": "SKU-IOT-400", "qty": 50, "bom_no": boms[0] if boms else "BOM-0001", "status": "In Process", "target_warehouse": "Rotterdam Hub", "produced_qty": 20, "submit": True},
+            {"production_item": "SKU-RACK-9U", "qty": 25, "bom_no": boms[1] if len(boms) > 1 else "BOM-0002", "status": "Not Started", "target_warehouse": "Newark Distribution Center", "produced_qty": 0, "submit": True},
+            {"production_item": "SKU-DRONE-INV", "qty": 10, "bom_no": boms[2] if len(boms) > 2 else "BOM-0003", "status": "In Process", "target_warehouse": "Tokyo Automated Depot", "produced_qty": 4, "submit": True},
+            {"production_item": "SKU-PLC-X8", "qty": 30, "bom_no": boms[3] if len(boms) > 3 else "BOM-0004", "status": "Completed", "target_warehouse": "Singapore FreeZone", "produced_qty": 30, "submit": True},
+            {"production_item": "SKU-IOT-400", "qty": 100, "bom_no": boms[0] if boms else "BOM-0001", "status": "Draft", "target_warehouse": "Frankfurt Cold Storage", "produced_qty": 0, "submit": False},
+        ]
+        for wo in sample_wos:
+            should_submit = wo.pop("submit", False)
+            d = frappe.get_doc({"doctype": "Work Order", **wo})
+            d.insert(ignore_permissions=True)
+            if should_submit:
+                d.submit()
+            seeded_records.append(f"Work Order:{d.name}")
+
+    # 23. Seed Support records (Issue and Warranty Claim)
+    if frappe.db.count("Issue") == 0:
+        sample_issues = [
+            {"subject": "Telemetry sync timeout on CryoSense unit at Rotterdam berth 4", "customer": "Acme Logistics Corp", "status": "Open", "priority": "High", "issue_type": "Firmware Telemetry", "resolution_time": 12},
+            {"subject": "Damaged container scanner bracket on maritime arrival", "customer": "Nordic Maritime Group", "status": "Replied", "priority": "Medium", "issue_type": "Hardware Fault", "resolution_time": 24},
+            {"subject": "Battery cell degradation alert on backup unit #88", "customer": "Federal Defense Logistics", "status": "On Hold", "priority": "Urgent", "issue_type": "Hardware Fault", "resolution_time": 8},
+            {"subject": "Freight invoice line discrepancy on SO-2026-0002", "customer": "Global Freight Partners", "status": "Resolved", "priority": "Low", "issue_type": "Billing Dispute", "resolution_time": 48},
+            {"subject": "Conveyor PLC firmware heartbeat drop in Dubai Hub", "customer": "Gulf Oasis Trading LLC", "status": "Open", "priority": "Urgent", "issue_type": "SLA Breach", "resolution_time": 6},
+        ]
+        for iss in sample_issues:
+            d = frappe.get_doc({"doctype": "Issue", **iss})
+            d.insert(ignore_permissions=True)
+            seeded_records.append(f"Issue:{d.name}")
+
+    if frappe.db.count("Warranty Claim") == 0:
+        sample_wcs = [
+            {"customer": "Acme Logistics Corp", "item_code": "SKU-IOT-400", "status": "Under Inspection", "resolution_type": "Replacement Unit", "claim_amount": 1850, "submit": True},
+            {"customer": "Nordic Maritime Group", "item_code": "SKU-LITH-200", "status": "Approved", "resolution_type": "Full Refund", "claim_amount": 9250, "submit": True},
+            {"customer": "Tokyo Robotics K.K.", "item_code": "SKU-DRONE-INV", "status": "Open", "resolution_type": "Board Repair", "claim_amount": 3200, "submit": False},
+            {"customer": "Gulf Oasis Trading LLC", "item_code": "SKU-PLC-X8", "status": "Approved", "resolution_type": "Replacement Unit", "claim_amount": 3100, "submit": True},
+        ]
+        for wc in sample_wcs:
+            should_submit = wc.pop("submit", False)
+            d = frappe.get_doc({"doctype": "Warranty Claim", **wc})
+            d.insert(ignore_permissions=True)
+            if should_submit:
+                d.submit()
+            seeded_records.append(f"Warranty Claim:{d.name}")
+
     frappe.db.commit()
 
-    # 22. Provision Frappe Desk Workspaces so the full ERP appears in the left sidebar
+    # 24. Provision Frappe Desk Workspaces so the full ERP appears in the left sidebar
     import json
 
     def _upsert_workspace(
@@ -980,18 +1108,20 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
             {"label": "Purchase Orders", "link_to": "Purchase Order", "color": "Orange"},
             {"label": "Customers", "link_to": "Customer", "color": "Green"},
             {"label": "Sales Invoices", "link_to": "Sales Invoice", "color": "Red"},
+            {"label": "Work Orders", "link_to": "Work Order", "color": "Yellow"},
+            {"label": "Support Issues", "link_to": "Issue", "color": "Pink"},
             {"label": "Inventory Items", "link_to": "Item", "color": "Cyan"},
-            {"label": "Projects", "link_to": "Project", "color": "Yellow"},
-            {"label": "Expense Claims", "link_to": "Expense Claim", "color": "Pink"},
-            {"label": "EXRP AI Settings", "link_to": "EXRP Settings", "doc_view": "", "color": "Grey"},
+            {"label": "EXRP Settings", "link_to": "EXRP Settings", "doc_view": "", "color": "Grey"},
         ],
         cards=[
             {"title": "Selling and CRM", "doctypes": ["Sales Order", "Quotation", "Delivery Note", "Customer", "Opportunity", "Lead"]},
             {"title": "Buying and Procurement", "doctypes": ["Purchase Order", "Material Request", "Purchase Receipt", "Supplier"]},
-            {"title": "Inventory and Warehousing", "doctypes": ["Item", "Warehouse", "Stock Ledger Entry"]},
+            {"title": "Inventory and Stock", "doctypes": ["Item", "Warehouse", "Stock Ledger Entry"]},
+            {"title": "Manufacturing and Production", "doctypes": ["Work Order", "BOM"]},
             {"title": "Accounting and Finance", "doctypes": ["Sales Invoice", "Payment Entry", "GL Entry"]},
             {"title": "HR and Projects", "doctypes": ["Employee", "Expense Claim", "Project"]},
-            {"title": "EXRP AI Control Plane", "doctypes": ["EXRP Settings", "Custom Field", "Property Setter", "Workflow", "Report"]},
+            {"title": "Support and Helpdesk", "doctypes": ["Issue", "Warranty Claim"]},
+            {"title": "Settings and Administration", "doctypes": ["EXRP Settings", "Custom Field", "Property Setter", "Workflow", "Report", "User", "Role"]},
         ],
     )
 
@@ -1044,10 +1174,24 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
     )
 
     _upsert_workspace(
+        ws_name="Manufacturing and Production",
+        title="Manufacturing and Production",
+        icon="tool",
+        seq=0.5,
+        shortcuts=[
+            {"label": "Work Order", "link_to": "Work Order", "color": "Orange"},
+            {"label": "BOM", "link_to": "BOM", "color": "Green"},
+        ],
+        cards=[
+            {"title": "Production Control", "doctypes": ["Work Order", "BOM", "Item", "Warehouse"]},
+        ],
+    )
+
+    _upsert_workspace(
         ws_name="Accounting and Finance",
         title="Accounting and Finance",
         icon="accounting",
-        seq=0.5,
+        seq=0.6,
         shortcuts=[
             {"label": "Sales Invoice", "link_to": "Sales Invoice", "color": "Red"},
             {"label": "Payment Entry", "link_to": "Payment Entry", "color": "Green"},
@@ -1062,7 +1206,7 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
         ws_name="HR and Projects",
         title="HR and Projects",
         icon="hr",
-        seq=0.6,
+        seq=0.7,
         shortcuts=[
             {"label": "Employee", "link_to": "Employee", "color": "Blue"},
             {"label": "Expense Claim", "link_to": "Expense Claim", "color": "Orange"},
@@ -1070,6 +1214,39 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
         ],
         cards=[
             {"title": "People and Delivery", "doctypes": ["Employee", "Expense Claim", "Project"]},
+        ],
+    )
+
+    _upsert_workspace(
+        ws_name="Support and Helpdesk",
+        title="Support and Helpdesk",
+        icon="support",
+        seq=0.8,
+        shortcuts=[
+            {"label": "Support Issues", "link_to": "Issue", "color": "Red"},
+            {"label": "Warranty Claims", "link_to": "Warranty Claim", "color": "Orange"},
+        ],
+        cards=[
+            {"title": "Customer Support", "doctypes": ["Issue", "Warranty Claim", "Customer"]},
+        ],
+    )
+
+    _upsert_workspace(
+        ws_name="Settings and Administration",
+        title="Settings and Administration",
+        icon="setting-gear",
+        seq=0.9,
+        shortcuts=[
+            {"label": "EXRP Settings", "link_to": "EXRP Settings", "doc_view": "", "color": "Blue"},
+            {"label": "System Settings", "link_to": "System Settings", "doc_view": "", "color": "Grey"},
+            {"label": "Users", "link_to": "User", "color": "Green"},
+            {"label": "Roles", "link_to": "Role", "color": "Orange"},
+            {"label": "Print Settings", "link_to": "Print Settings", "doc_view": "", "color": "Yellow"},
+            {"label": "Email Accounts", "link_to": "Email Account", "color": "Cyan"},
+        ],
+        cards=[
+            {"title": "AI Control Plane", "doctypes": ["EXRP Settings", "Custom Field", "Property Setter", "Workflow", "Report"]},
+            {"title": "System and Security", "doctypes": ["System Settings", "User", "Role", "Email Account", "Print Settings"]},
         ],
     )
 
@@ -1091,7 +1268,10 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
             "Selling and CRM",
             "Buying and Procurement",
             "Inventory and Stock",
+            "Manufacturing and Production",
             "Accounting and Finance",
             "HR and Projects",
+            "Support and Helpdesk",
+            "Settings and Administration",
         ],
     }

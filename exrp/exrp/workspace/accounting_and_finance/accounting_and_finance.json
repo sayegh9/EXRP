@@ -52,7 +52,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-11-05 15:43:22.861650",
+ "modified": "2026-11-05 16:03:33.698781",
  "modified_by": "Administrator",
  "module": "EXRP",
  "name": "Accounting and Finance",
@@ -61,7 +61,7 @@
  "public": 1,
  "quick_lists": [],
  "roles": [],
- "sequence_id": 0.5,
+ "sequence_id": 0.6,
  "shortcuts": [
   {
    "color": "Red",

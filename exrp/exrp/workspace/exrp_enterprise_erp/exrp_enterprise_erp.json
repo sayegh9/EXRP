@@ -1,6 +1,6 @@
 {
  "charts": [],
- "content": "[{\"id\": \"hdr_sc_EXRP_E\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Quick Access & Live Counts</b></span>\", \"col\": 12}}, {\"id\": \"sc_0_Sales_Or\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Sales Orders\", \"col\": 3}}, {\"id\": \"sc_1_Purchase\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Purchase Orders\", \"col\": 3}}, {\"id\": \"sc_2_Customer\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Customers\", \"col\": 3}}, {\"id\": \"sc_3_Sales_In\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Sales Invoices\", \"col\": 3}}, {\"id\": \"sc_4_Inventor\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Inventory Items\", \"col\": 3}}, {\"id\": \"sc_5_Projects\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Projects\", \"col\": 3}}, {\"id\": \"sc_6_Expense_\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Expense Claims\", \"col\": 3}}, {\"id\": \"sc_7_EXRP_AI_\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"EXRP AI Settings\", \"col\": 3}}, {\"id\": \"spc_main\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"hdr_cards\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>ERP Modules & Masters</b></span>\", \"col\": 12}}, {\"id\": \"crd_0_Selling_\", \"type\": \"card\", \"data\": {\"card_name\": \"Selling and CRM\", \"col\": 4}}, {\"id\": \"crd_1_Buying_a\", \"type\": \"card\", \"data\": {\"card_name\": \"Buying and Procurement\", \"col\": 4}}, {\"id\": \"crd_2_Inventor\", \"type\": \"card\", \"data\": {\"card_name\": \"Inventory and Warehousing\", \"col\": 4}}, {\"id\": \"crd_3_Accounti\", \"type\": \"card\", \"data\": {\"card_name\": \"Accounting and Finance\", \"col\": 4}}, {\"id\": \"crd_4_HR_and_P\", \"type\": \"card\", \"data\": {\"card_name\": \"HR and Projects\", \"col\": 4}}, {\"id\": \"crd_5_EXRP_AI_\", \"type\": \"card\", \"data\": {\"card_name\": \"EXRP AI Control Plane\", \"col\": 4}}]",
+ "content": "[{\"id\": \"hdr_sc_EXRP_E\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Quick Access & Live Counts</b></span>\", \"col\": 12}}, {\"id\": \"sc_0_Sales_Or\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Sales Orders\", \"col\": 3}}, {\"id\": \"sc_1_Purchase\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Purchase Orders\", \"col\": 3}}, {\"id\": \"sc_2_Customer\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Customers\", \"col\": 3}}, {\"id\": \"sc_3_Sales_In\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Sales Invoices\", \"col\": 3}}, {\"id\": \"sc_4_Work_Ord\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Work Orders\", \"col\": 3}}, {\"id\": \"sc_5_Support_\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Support Issues\", \"col\": 3}}, {\"id\": \"sc_6_Inventor\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Inventory Items\", \"col\": 3}}, {\"id\": \"sc_7_EXRP_Set\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"EXRP Settings\", \"col\": 3}}, {\"id\": \"spc_main\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"hdr_cards\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>ERP Modules & Masters</b></span>\", \"col\": 12}}, {\"id\": \"crd_0_Selling_\", \"type\": \"card\", \"data\": {\"card_name\": \"Selling and CRM\", \"col\": 4}}, {\"id\": \"crd_1_Buying_a\", \"type\": \"card\", \"data\": {\"card_name\": \"Buying and Procurement\", \"col\": 4}}, {\"id\": \"crd_2_Inventor\", \"type\": \"card\", \"data\": {\"card_name\": \"Inventory and Stock\", \"col\": 4}}, {\"id\": \"crd_3_Manufact\", \"type\": \"card\", \"data\": {\"card_name\": \"Manufacturing and Production\", \"col\": 4}}, {\"id\": \"crd_4_Accounti\", \"type\": \"card\", \"data\": {\"card_name\": \"Accounting and Finance\", \"col\": 4}}, {\"id\": \"crd_5_HR_and_P\", \"type\": \"card\", \"data\": {\"card_name\": \"HR and Projects\", \"col\": 4}}, {\"id\": \"crd_6_Support_\", \"type\": \"card\", \"data\": {\"card_name\": \"Support and Helpdesk\", \"col\": 4}}, {\"id\": \"crd_7_Settings\", \"type\": \"card\", \"data\": {\"card_name\": \"Settings and Administration\", \"col\": 4}}]",
  "creation": "2026-11-05 15:39:23.322097",
  "custom_blocks": [],
  "docstatus": 0,
@@ -133,7 +133,7 @@
   {
    "hidden": 0,
    "is_query_report": 0,
-   "label": "Inventory and Warehousing",
+   "label": "Inventory and Stock",
    "link_count": 0,
    "link_type": "DocType",
    "onboard": 0,
@@ -165,6 +165,35 @@
    "label": "Stock Ledger Entry",
    "link_count": 0,
    "link_to": "Stock Ledger Entry",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Manufacturing and Production",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Work Order",
+   "link_count": 0,
+   "link_to": "Work Order",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "BOM",
+   "link_count": 0,
+   "link_to": "BOM",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
@@ -250,7 +279,36 @@
   {
    "hidden": 0,
    "is_query_report": 0,
-   "label": "EXRP AI Control Plane",
+   "label": "Support and Helpdesk",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Issue",
+   "link_count": 0,
+   "link_to": "Issue",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Warranty Claim",
+   "link_count": 0,
+   "link_to": "Warranty Claim",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Settings and Administration",
    "link_count": 0,
    "link_type": "DocType",
    "onboard": 0,
@@ -305,9 +363,29 @@
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "User",
+   "link_count": 0,
+   "link_to": "User",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Role",
+   "link_count": 0,
+   "link_to": "Role",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
   }
  ],
- "modified": "2026-11-05 15:43:22.035905",
+ "modified": "2026-11-05 16:03:33.033959",
  "modified_by": "Administrator",
  "module": "EXRP",
  "name": "EXRP Enterprise ERP",
@@ -351,6 +429,22 @@
    "type": "DocType"
   },
   {
+   "color": "Yellow",
+   "doc_view": "List",
+   "label": "Work Orders",
+   "link_to": "Work Order",
+   "stats_filter": "{}",
+   "type": "DocType"
+  },
+  {
+   "color": "Pink",
+   "doc_view": "List",
+   "label": "Support Issues",
+   "link_to": "Issue",
+   "stats_filter": "{}",
+   "type": "DocType"
+  },
+  {
    "color": "Cyan",
    "doc_view": "List",
    "label": "Inventory Items",
@@ -359,25 +453,9 @@
    "type": "DocType"
   },
   {
-   "color": "Yellow",
-   "doc_view": "List",
-   "label": "Projects",
-   "link_to": "Project",
-   "stats_filter": "{}",
-   "type": "DocType"
-  },
-  {
-   "color": "Pink",
-   "doc_view": "List",
-   "label": "Expense Claims",
-   "link_to": "Expense Claim",
-   "stats_filter": "{}",
-   "type": "DocType"
-  },
-  {
    "color": "Grey",
    "doc_view": "",
-   "label": "EXRP AI Settings",
+   "label": "EXRP Settings",
    "link_to": "EXRP Settings",
    "stats_filter": "{}",
    "type": "DocType"
