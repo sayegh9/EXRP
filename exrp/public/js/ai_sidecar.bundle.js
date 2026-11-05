@@ -644,7 +644,7 @@
       const isDark = this.isDarkModeActive();
       const logoImgs = document.querySelectorAll('.navbar .app-logo, .navbar-brand .app-logo');
       logoImgs.forEach(img => {
-        img.src = isDark ? '/assets/exrp/images/exrp-logo-dark.svg' : '/assets/exrp/images/exrp-logo.svg';
+        img.src = isDark ? '/assets/exrp/images/exrp-logo-dark.png' : '/assets/exrp/images/exrp-logo.svg';
       });
 
       const symbolImgs = document.querySelectorAll('.exrp-brand-symbol-img');

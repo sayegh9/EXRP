@@ -87,7 +87,7 @@ body.dark,
 [data-theme="dark"] .navbar .app-logo,
 [data-theme-mode="dark"] .navbar .app-logo,
 body.dark .navbar .app-logo {
-  content: url("/assets/exrp/images/exrp-logo-dark.svg") !important;
+  content: url("/assets/exrp/images/exrp-logo-dark.png") !important;
 }
 
 [data-theme="light"] .navbar .app-logo,
