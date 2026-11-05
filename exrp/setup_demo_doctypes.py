@@ -986,18 +986,18 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
             {"label": "EXRP AI Settings", "link_to": "EXRP Settings", "doc_view": "", "color": "Grey"},
         ],
         cards=[
-            {"title": "Selling & CRM", "doctypes": ["Sales Order", "Quotation", "Delivery Note", "Customer", "Opportunity", "Lead"]},
-            {"title": "Buying & Procurement", "doctypes": ["Purchase Order", "Material Request", "Purchase Receipt", "Supplier"]},
-            {"title": "Inventory & Warehousing", "doctypes": ["Item", "Warehouse", "Stock Ledger Entry"]},
-            {"title": "Accounting & Finance", "doctypes": ["Sales Invoice", "Payment Entry", "GL Entry"]},
-            {"title": "HR & Projects", "doctypes": ["Employee", "Expense Claim", "Project"]},
+            {"title": "Selling and CRM", "doctypes": ["Sales Order", "Quotation", "Delivery Note", "Customer", "Opportunity", "Lead"]},
+            {"title": "Buying and Procurement", "doctypes": ["Purchase Order", "Material Request", "Purchase Receipt", "Supplier"]},
+            {"title": "Inventory and Warehousing", "doctypes": ["Item", "Warehouse", "Stock Ledger Entry"]},
+            {"title": "Accounting and Finance", "doctypes": ["Sales Invoice", "Payment Entry", "GL Entry"]},
+            {"title": "HR and Projects", "doctypes": ["Employee", "Expense Claim", "Project"]},
             {"title": "EXRP AI Control Plane", "doctypes": ["EXRP Settings", "Custom Field", "Property Setter", "Workflow", "Report"]},
         ],
     )
 
     _upsert_workspace(
         ws_name="Selling and CRM",
-        title="Selling & CRM",
+        title="Selling and CRM",
         icon="retail",
         seq=0.2,
         shortcuts=[
@@ -1014,7 +1014,7 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
 
     _upsert_workspace(
         ws_name="Buying and Procurement",
-        title="Buying & Procurement",
+        title="Buying and Procurement",
         icon="buying",
         seq=0.3,
         shortcuts=[
@@ -1030,7 +1030,7 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
 
     _upsert_workspace(
         ws_name="Inventory and Stock",
-        title="Inventory & Stock",
+        title="Inventory and Stock",
         icon="stock",
         seq=0.4,
         shortcuts=[
@@ -1039,13 +1039,13 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
             {"label": "Stock Ledger Entry", "link_to": "Stock Ledger Entry", "color": "Grey"},
         ],
         cards=[
-            {"title": "Stock & Warehouses", "doctypes": ["Item", "Warehouse", "Stock Ledger Entry"]},
+            {"title": "Stock and Warehouses", "doctypes": ["Item", "Warehouse", "Stock Ledger Entry"]},
         ],
     )
 
     _upsert_workspace(
         ws_name="Accounting and Finance",
-        title="Accounting & Finance",
+        title="Accounting and Finance",
         icon="accounting",
         seq=0.5,
         shortcuts=[
@@ -1054,13 +1054,13 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
             {"label": "GL Entry", "link_to": "GL Entry", "color": "Grey"},
         ],
         cards=[
-            {"title": "Ledgers & Billing", "doctypes": ["Sales Invoice", "Payment Entry", "GL Entry"]},
+            {"title": "Ledgers and Billing", "doctypes": ["Sales Invoice", "Payment Entry", "GL Entry"]},
         ],
     )
 
     _upsert_workspace(
         ws_name="HR and Projects",
-        title="HR & Projects",
+        title="HR and Projects",
         icon="hr",
         seq=0.6,
         shortcuts=[
@@ -1069,7 +1069,7 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
             {"label": "Project", "link_to": "Project", "color": "Green"},
         ],
         cards=[
-            {"title": "People & Delivery", "doctypes": ["Employee", "Expense Claim", "Project"]},
+            {"title": "People and Delivery", "doctypes": ["Employee", "Expense Claim", "Project"]},
         ],
     )
 
