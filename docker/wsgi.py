@@ -8,4 +8,6 @@ if sites_path not in sys.path:
 
 import frappe.app
 
+frappe.app._site = os.environ.get("FRAPPE_SITE", "exrp.localhost")
+
 application = frappe.app.application_with_statics()

@@ -1269,30 +1269,82 @@
       const ddlPlan = data.ddl_plan || {};
       const cardId = 'exrp-card-' + Math.random().toString(36).substring(2, 9);
 
+      const isPropertySetter = Boolean(
+        proposal.intent === 'set_property' ||
+        proposal.intent === 'quarantine_custom_field' ||
+        proposal.intent === 'property_setter' ||
+        (fieldDef && (fieldDef.property || fieldDef.property_name))
+      );
+      const isQuarantine = Boolean(
+        proposal.intent === 'quarantine_custom_field' ||
+        (fieldDef && (fieldDef.property === 'hidden' || fieldDef.property_name === 'hidden'))
+      );
+
       // Gate badge info
       const tier = validation.governance_tier || (isSuccess ? 'TIER_1_GOVERNED_POLICY' : 'TIER_0_IMMUTABLE_INVARIANT');
-      const storageImpact = validation.storage_impact || 'ONLINE_ADDITIVE_DDL';
+      const storageImpact = isPropertySetter ? 'METADATA_ONLY' : (validation.storage_impact || 'ONLINE_ADDITIVE_DDL');
       const isApproved = isSuccess && validation.status !== 'rejected';
-      const isDdlApproved = ddlPlan.is_approved_additive_only !== false && isApproved;
+      const isDdlApproved = isPropertySetter || (ddlPlan.is_approved_additive_only !== false && isApproved);
 
       const tierBadgeHtml = isApproved
         ? `<span class="exrp-gate-badge approved">✓ Approved (${tier === 'TIER_1_GOVERNED_POLICY' ? 'Tier 1 Governed Policy' : 'Tier 2 Ordinary Config'})</span>`
         : `<span class="exrp-gate-badge rejected">✕ Rejected (${tier === 'TIER_0_IMMUTABLE_INVARIANT' ? 'Tier 0 Invariant' : 'Policy Gate'})</span>`;
 
-      const ddlBadgeHtml = isDdlApproved
-        ? `<span class="exrp-ddl-badge">Safe Additive DDL</span>`
-        : `<span class="exrp-ddl-badge" style="background: rgba(239, 68, 68, 0.18); color: #f87171;">Rejected by Gate</span>`;
+      const ddlBadgeHtml = isPropertySetter
+        ? `<span class="exrp-ddl-badge" style="background: rgba(16, 185, 129, 0.18); color: #10b981;">0 DDL / Metadata Safe</span>`
+        : (isDdlApproved
+          ? `<span class="exrp-ddl-badge">Safe Additive DDL</span>`
+          : `<span class="exrp-ddl-badge" style="background: rgba(239, 68, 68, 0.18); color: #f87171;">Rejected by Gate</span>`);
 
       // SQL statements
-      const sqlStatements = (ddlPlan.statements && ddlPlan.statements.length > 0)
-        ? ddlPlan.statements.join(';\n') + ';'
-        : (ddlPlan.rejection_reason
-          ? `-- ${ddlPlan.rejection_reason}`
-          : (fieldDef.fieldname ? `ALTER TABLE \`tab${doctype}\` ADD COLUMN \`${fieldDef.fieldname}\` varchar(140) NULL;` : '-- No physical DDL required --'));
+      const sqlStatements = isPropertySetter
+        ? (isQuarantine
+          ? `-- Zero Physical DDL (Field Soft-Quarantine via Property Setter: hidden=1, reqd=0; columns preserved) --`
+          : `-- Zero Physical DDL (Metadata Mutation via Property Setter) --`)
+        : ((ddlPlan.statements && ddlPlan.statements.length > 0)
+          ? ddlPlan.statements.join(';\n') + ';'
+          : (ddlPlan.rejection_reason
+            ? `-- ${ddlPlan.rejection_reason}`
+            : (fieldDef.fieldname ? `ALTER TABLE \`tab${doctype}\` ADD COLUMN \`${fieldDef.fieldname}\` varchar(140) NULL;` : '-- No physical DDL required --')));
 
-      // Table rows for proposed fields
+      // Table rows for proposed fields or property setters
+      let tableHeaderHtml = `
+        <tr>
+          <th>Fieldname</th>
+          <th>Label</th>
+          <th>Type</th>
+          <th>Options</th>
+          <th>Mandatory</th>
+        </tr>
+      `;
       let tableRows = '';
-      if (changes.length > 0) {
+      if (isPropertySetter) {
+        tableHeaderHtml = `
+          <tr>
+            <th>Fieldname</th>
+            <th>Property</th>
+            <th>Target Value</th>
+            <th>Property Type</th>
+          </tr>
+        `;
+        if (changes.length > 0) {
+          changes.forEach((f) => {
+            const propName = f.property || f.property_name || 'hidden';
+            const propVal = f.value !== undefined ? f.value : (propName === 'hidden' ? 1 : '');
+            const propType = f.property_type || (propName === 'hidden' ? 'Check' : 'Data');
+            tableRows += `
+              <tr>
+                <td class="exrp-code-cell">${escapeHtml(f.fieldname || doctype)}</td>
+                <td><strong>${escapeHtml(propName)}</strong></td>
+                <td><code>${escapeHtml(String(propVal))}</code></td>
+                <td><span class="exrp-doctype-badge">${escapeHtml(propType)}</span></td>
+              </tr>
+            `;
+          });
+        } else {
+          tableRows = `<tr><td colspan="4" style="text-align:center; color: var(--exrp-text-muted);">No property changes in proposal</td></tr>`;
+        }
+      } else if (changes.length > 0) {
         changes.forEach((f) => {
           tableRows += `
             <tr>
@@ -1342,13 +1394,7 @@
               <div class="exrp-field-table-wrapper">
                 <table class="exrp-field-table">
                   <thead>
-                    <tr>
-                      <th>Fieldname</th>
-                      <th>Label</th>
-                      <th>Type</th>
-                      <th>Options</th>
-                      <th>Mandatory</th>
-                    </tr>
+                    ${tableHeaderHtml}
                   </thead>
                   <tbody>
                     ${tableRows}
@@ -1461,11 +1507,20 @@
       this.isDeploying = true;
       this.sendBtnEl.disabled = true;
 
+      const isPropertySetter = Boolean(
+        (proposal && (proposal.intent === 'set_property' || proposal.intent === 'quarantine_custom_field' || proposal.intent === 'property_setter' || proposal.intent === 'update_field_property' || proposal.change_type === 'property_setter')) ||
+        (fieldDef && (fieldDef.property || fieldDef.property_type))
+      );
+      const isQuarantine = Boolean(
+        (proposal && (proposal.intent === 'quarantine_custom_field')) ||
+        (fieldDef && (fieldDef.property === 'hidden' || fieldDef.property_name === 'hidden'))
+      );
+
       // Render 4-stage deployment tracker HTML
       footerEl.innerHTML = `
         <div class="exrp-deployment-tracker" id="${cardId}-tracker">
           <div class="exrp-tracker-title">
-            <span>🛡️ Durable Schema Deployment Sequence</span>
+            <span>🛡️ ${isQuarantine ? 'Field Soft-Quarantine Sequence' : (isPropertySetter ? 'Durable Metadata Mutation Sequence' : 'Durable Schema Deployment Sequence')}</span>
           </div>
           <div class="exrp-stage-list">
             <div class="exrp-stage-item in-progress" id="${cardId}-stage-1">
@@ -1474,15 +1529,15 @@
             </div>
             <div class="exrp-stage-item pending" id="${cardId}-stage-2">
               <span class="exrp-stage-icon">2</span>
-              <span class="exrp-stage-name">2. Dry-Run Gate (Policy &amp; DDL Invariant Verification)</span>
+              <span class="exrp-stage-name">2. Dry-Run Gate (Policy &amp; Invariant Verification)</span>
             </div>
             <div class="exrp-stage-item pending" id="${cardId}-stage-3">
               <span class="exrp-stage-icon">3</span>
-              <span class="exrp-stage-name">3. Apply Native DDL (Online Table Mutation)</span>
+              <span class="exrp-stage-name">3. ${isQuarantine ? 'Apply Soft-Quarantine (hidden=1, reqd=0)' : (isPropertySetter ? 'Apply Property Setter (Metadata Mutation)' : 'Apply Native DDL (Online Table Mutation)')}</span>
             </div>
             <div class="exrp-stage-item pending" id="${cardId}-stage-4">
               <span class="exrp-stage-icon">4</span>
-              <span class="exrp-stage-name">4. Verify Snapshot (Non-Destructive Reconciliation)</span>
+              <span class="exrp-stage-name">4. Verify Snapshot (${isPropertySetter ? 'Cache Clear &amp; Metadata Reflection' : 'Non-Destructive Reconciliation'})</span>
             </div>
           </div>
           <div id="${cardId}-tracker-result"></div>
@@ -1520,16 +1575,19 @@
           this.sendBtnEl.disabled = !this.inputEl.value.trim();
 
           const deploymentId = (res && res.deployment_id) || (proposal && proposal.deployment_id) || ('dep_' + Math.random().toString(36).substring(2, 10));
-          const isPropertySetter = Boolean(
-            (proposal && (proposal.intent === 'property_setter' || proposal.intent === 'update_field_property' || proposal.change_type === 'property_setter' || proposal.operation === 'property_setter')) ||
-            (fieldDef && (fieldDef.property || fieldDef.property_type))
-          );
+
+          let successText = `✓ Custom Field <code>${escapeHtml(fieldDef.fieldname || 'custom_field')}</code> deployed live to production!`;
+          if (isQuarantine) {
+            successText = `✓ Custom field <code>${escapeHtml(fieldDef.fieldname || 'custom_field')}</code> soft-quarantined (hidden=1, reqd=0) preserving historical data!`;
+          } else if (isPropertySetter) {
+            successText = `✓ Property Setter <code>${escapeHtml(fieldDef.property || 'property')} = ${escapeHtml(String(fieldDef.value !== undefined ? fieldDef.value : 1))}</code> deployed live!`;
+          }
 
           resultBox.innerHTML = `
             <div class="exrp-deploy-success-box">
               <div class="exrp-deploy-success-details">
                 <div class="exrp-deploy-success-msg">
-                  <span>✓ ${isPropertySetter ? 'Property Setter' : 'Custom Field'} <code>${escapeHtml(fieldDef.fieldname || 'custom_field')}</code> deployed live to production!</span>
+                  <span>${successText}</span>
                   <span class="exrp-quarantine-badge" id="${cardId}-quarantine-badge" style="display: none;"></span>
                 </div>
                 <button type="button" class="exrp-btn-action exrp-btn-revert" id="${cardId}-btn-revert" title="Revert or quarantine this configuration change safely" data-deployment-id="${escapeHtml(deploymentId)}">
@@ -1642,9 +1700,14 @@
 
           // Show Frappe native alert
           if (window.frappe && typeof window.frappe.show_alert === 'function') {
+            const alertMsg = isQuarantine
+              ? __('EXRP: Custom field {0} quarantined (hidden=1) on {1}!', [fieldDef.fieldname || 'field', doctype])
+              : (isPropertySetter
+                ? __('EXRP: Property Setter applied to {0} on {1}!', [fieldDef.fieldname || 'field', doctype])
+                : __('EXRP: Custom field {0} deployed live to {1}!', [fieldDef.fieldname || 'field', doctype]));
             window.frappe.show_alert({
-              message: __('EXRP: Custom field {0} deployed live to {1}!', [fieldDef.fieldname || 'field', doctype]),
-              indicator: 'green',
+              message: alertMsg,
+              indicator: isQuarantine ? 'orange' : 'green',
             });
           }
 
@@ -1655,7 +1718,13 @@
 
           // Update context bar count
           this.updateContext();
-          this.appendAssistantMessage(`🎉 <strong>Deployment Successful!</strong> Custom field <code>${escapeHtml(fieldDef.fieldname)}</code> (${escapeHtml(fieldDef.label)}) is now active on <strong>${escapeHtml(doctype)}</strong>.`);
+          if (isQuarantine) {
+            this.appendAssistantMessage(`🎉 <strong>Quarantine Applied:</strong> Custom field <code>${escapeHtml(fieldDef.fieldname)}</code> has been soft-quarantined (hidden=1, reqd=0) on <strong>${escapeHtml(doctype)}</strong>. Historical database records and table columns remain intact.`);
+          } else if (isPropertySetter) {
+            this.appendAssistantMessage(`🎉 <strong>Property Updated:</strong> Property <code>${escapeHtml(fieldDef.property || 'property')}</code> updated on <code>${escapeHtml(fieldDef.fieldname)}</code> for <strong>${escapeHtml(doctype)}</strong>.`);
+          } else {
+            this.appendAssistantMessage(`🎉 <strong>Deployment Successful!</strong> Custom field <code>${escapeHtml(fieldDef.fieldname)}</code> (${escapeHtml(fieldDef.label)}) is now active on <strong>${escapeHtml(doctype)}</strong>.`);
+          }
         }, 500);
       };
 

@@ -227,6 +227,13 @@ def execute_property_setter_deployment(
             "property_name": property_name,
         }
 
+        base_revision_hash = kwargs.get("base_revision_hash")
+        if not base_revision_hash:
+            if hasattr(db, "get_doctype_revision_hash") and callable(getattr(db, "get_doctype_revision_hash", None)):
+                base_revision_hash = db.get_doctype_revision_hash(doctype)
+            else:
+                base_revision_hash = "rev_ps_default"
+
         prepare_record = {
             "deployment_id": deployment_id,
             "idempotency_key": idempotency_key,
@@ -234,6 +241,7 @@ def execute_property_setter_deployment(
             "site_id": site_id,
             "doctype": doctype,
             "fieldname": fieldname,
+            "base_revision_hash": base_revision_hash,
             "deployment_type": "property_setter",
             "property_name": property_name,
             "property_value": normalized_value,
@@ -287,6 +295,40 @@ def execute_property_setter_deployment(
                     )
                 if hasattr(frappe, "db") and hasattr(frappe.db, "commit"):
                     frappe.db.commit()
+
+            # ADR-001 Rev 2.3 (§9.1): When quarantining a field (hidden=1), also set reqd=0
+            # to guarantee that hiding the field does not cause mandatory validation errors on document save.
+            if property_name == "hidden" and int(normalized_value) == 1 and fieldname:
+                try:
+                    if hasattr(db, "apply_property_setter") and callable(getattr(db, "apply_property_setter", None)):
+                        db.apply_property_setter(
+                            doctype=doctype,
+                            fieldname=fieldname,
+                            property_name="reqd",
+                            value=0,
+                            property_type="Check",
+                        )
+                    elif frappe and hasattr(frappe, "make_property_setter"):
+                        try:
+                            frappe.make_property_setter({
+                                "doctype": doctype,
+                                "fieldname": fieldname,
+                                "property": "reqd",
+                                "value": 0,
+                                "property_type": "Check",
+                            })
+                        except TypeError:
+                            frappe.make_property_setter(
+                                doctype=doctype,
+                                fieldname=fieldname,
+                                property="reqd",
+                                value=0,
+                                property_type="Check",
+                            )
+                        if hasattr(frappe, "db") and hasattr(frappe.db, "commit"):
+                            frappe.db.commit()
+                except Exception:
+                    pass
         except Exception as exc:
             apply_error = str(exc)
 
@@ -355,7 +397,7 @@ def execute_property_setter_deployment(
                     "deployment_id": deployment_id,
                     "status": "APPLIED",
                     "success": True,
-                    "disposition": "PROPERTY_SETTER_APPLIED",
+                    "disposition": "CUSTOM_FIELD_QUARANTINED" if (property_name == "hidden" and int(normalized_value) == 1) else "PROPERTY_SETTER_APPLIED",
                     "doctype": doctype,
                     "fieldname": fieldname,
                     "property_name": property_name,

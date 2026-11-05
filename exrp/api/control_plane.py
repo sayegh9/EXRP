@@ -221,6 +221,13 @@ def propose_configuration_change(
             "is_approved_additive_only": ddl_plan.is_approved_additive_only,
             "rejection_reason": ddl_plan.rejection_reason,
         }
+    elif proposal_payload.get("intent") in ("set_property", "quarantine_custom_field", "update_field_property", "property_setter"):
+        ddl_plan_result = {
+            "inspectable": True,
+            "statements": ["-- Zero DDL (Metadata Mutation via Property Setter / Soft Quarantine) --"],
+            "is_approved_additive_only": True,
+            "rejection_reason": None,
+        }
 
     return {
         "status": "PROPOSED",
@@ -628,15 +635,15 @@ class FrappeDeploymentAdapter:
                     updated_at = NOW(6)
             """, (
                 dep_id,
-                record["deployment_id"],
-                record["idempotency_key"],
-                record["payload_hash"],
-                record["site_id"],
-                record["doctype"],
-                record["fieldname"],
-                record["base_revision_hash"],
+                record.get("deployment_id", dep_id),
+                record.get("idempotency_key", f"idemp-{dep_id}"),
+                record.get("payload_hash", "hash_default"),
+                record.get("site_id", "default"),
+                record.get("doctype", ""),
+                record.get("fieldname") or "",
+                record.get("base_revision_hash", "rev_default"),
                 ddl_stmts,
-                record["status"],
+                record.get("status", "PREPARED"),
             ))
             if hasattr(self._frappe.db, "commit"):
                 self._frappe.db.commit()
@@ -1067,6 +1074,19 @@ def apply_configuration_change(
         if changes:
             field_def = changes[0]
 
+    # Normalize JSON proposal if serialized over RPC
+    if isinstance(proposal, str):
+        try:
+            proposal = json.loads(proposal)
+        except Exception:
+            pass
+
+    # Extract field_def from proposal if needed
+    if not field_def and isinstance(proposal, dict):
+        changes = proposal.get("changes", [])
+        if changes:
+            field_def = changes[0]
+
     # Normalize JSON field_def if serialized over RPC
     if isinstance(field_def, str):
         try:
@@ -1123,6 +1143,61 @@ def apply_configuration_change(
             ),
             "execution_time_ms": execution_time_ms,
         }
+
+    # Step 1.2: Check intent and route to appropriate declarative engine
+    intent = None
+    if isinstance(proposal, dict):
+        intent = proposal.get("intent")
+    if not intent and isinstance(field_def, dict):
+        if "property" in field_def or "property_name" in field_def:
+            intent = "set_property"
+    if not intent:
+        intent = kwargs.get("intent")
+
+    forward_kwargs = dict(kwargs)
+    forward_kwargs.pop("user_roles", None)
+    forward_kwargs.pop("adapter", None)
+    forward_kwargs.pop("db", None)
+    forward_kwargs.pop("site", None)
+    forward_kwargs.pop("site_id", None)
+    forward_kwargs.pop("fieldname", None)
+    forward_kwargs.pop("property", None)
+    forward_kwargs.pop("property_name", None)
+    forward_kwargs.pop("value", None)
+    forward_kwargs.pop("property_type", None)
+    forward_kwargs.pop("workflow_def", None)
+    forward_kwargs.pop("workflow", None)
+    forward_kwargs.pop("report_def", None)
+    forward_kwargs.pop("report", None)
+    forward_kwargs.pop("intent", None)
+
+    if intent in ("create_workflow", "workflow_action", "workflow"):
+        wf_data = (proposal.get("workflow") or proposal.get("workflow_def")) if isinstance(proposal, dict) else (kwargs.get("workflow_def") or kwargs.get("workflow"))
+        return apply_workflow_change(doctype=doctype, deployment_id=deployment_id, workflow_def=wf_data, user_roles=user_roles, **forward_kwargs)
+
+    if intent in ("create_report", "report", "report_builder"):
+        rep_data = (proposal.get("report") or proposal.get("report_def")) if isinstance(proposal, dict) else (kwargs.get("report_def") or kwargs.get("report"))
+        return apply_report_change(doctype=doctype, deployment_id=deployment_id, report_def=rep_data, user_roles=user_roles, **forward_kwargs)
+
+    if intent in ("set_property", "update_field_property", "property_setter", "quarantine_custom_field") or (isinstance(field_def, dict) and ("property" in field_def or "property_name" in field_def)):
+        f_name = (field_def.get("fieldname") if isinstance(field_def, dict) else None) or kwargs.get("fieldname")
+        p_name = (field_def.get("property") or field_def.get("property_name") if isinstance(field_def, dict) else None) or kwargs.get("property") or kwargs.get("property_name") or "hidden"
+        val = (field_def.get("value") if isinstance(field_def, dict) and "value" in field_def else None)
+        if val is None:
+            val = kwargs.get("value", 1)
+        p_type = (field_def.get("property_type") if isinstance(field_def, dict) else None) or kwargs.get("property_type", "Check")
+        return apply_property_setter_change(
+            doctype=doctype,
+            deployment_id=deployment_id,
+            fieldname=f_name,
+            property_name=p_name,
+            value=val,
+            property_type=p_type,
+            adapter=adapter or kwargs.get("db"),
+            site_id=site_id,
+            user_roles=user_roles,
+            **forward_kwargs,
+        )
 
     # Step 1.5: Validate mutation safety against Zone rules & Tier 0 invariants
     proposal_payload = proposal if isinstance(proposal, dict) else {

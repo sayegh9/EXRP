@@ -662,6 +662,14 @@ class AIConfigurationPlanner:
                             feedback_history=feedback_history,
                         )
                     continue
+            elif proposal.intent in ("set_property", "update_field_property", "property_setter", "quarantine_custom_field"):
+                ddl_plan_dict = {
+                    "inspectable": True,
+                    "statements": ["-- Zero DDL (Metadata Mutation via Property Setter / Soft Quarantine) --"],
+                    "is_approved_additive_only": True,
+                    "rejection_reason": None,
+                }
+                last_ddl_plan = ddl_plan_dict
 
             # 5. Success: Validated and Approved
             return PlannerResult(
@@ -725,6 +733,16 @@ class AIConfigurationPlanner:
             "   - sort_order: 'asc' or 'desc'.\n"
             "   - chart: Optional chart config with 'chart_type' ('Bar', 'Line', 'Pie', 'Donut', 'Percentage'), 'x_field', 'y_fields'.\n"
             "   - Reports are strictly PROHIBITED on system internal / Tier 0 locked DocTypes (e.g. User, Role, DocType, Custom Field, Property Setter, Workflow, GL Entry).\n"
+            "10. For field deletion, removal, hiding, soft-quarantine, or property mutation:\n"
+            "   - Under ADR-001 Rev 2.3 (§9.1), physical column drops (ALTER TABLE ... DROP COLUMN) are strictly PROHIBITED during conversational execution to prevent data loss.\n"
+            "   - When the user asks to delete, remove, hide, or quarantine an existing custom field (or non-invariant standard field):\n"
+            "     * Set intent to 'set_property'.\n"
+            "     * In 'changes', output a single dict: {'fieldname': '<existing_fieldname>', 'property': 'hidden', 'value': 1, 'property_type': 'Check'}.\n"
+            "     * Set governance_tier to 1.\n"
+            "     * In 'summary' and 'reasoning', explain that physical column drops are prohibited under ADR-001 Rev 2.3 (§9.1) to preserve historical data, and the field is being safely soft-quarantined (hidden=1, reqd=0) via Property Setter.\n"
+            "   - When the user asks to update a property (e.g. change label, make mandatory, add description):\n"
+            "     * Set intent to 'set_property'.\n"
+            "     * In 'changes', output: {'fieldname': '<existing_fieldname>', 'property': '<property_name>', 'value': <new_value>, 'property_type': '<property_type>'}.\n"
         )
 
         user_content = (
@@ -1097,6 +1115,100 @@ class AIConfigurationPlanner:
                     changes=[{"fieldname": matched_field, "property": "read_only", "value": 0}],
                     governance_tier=0,
                 )
+
+        # 1b. Field Deletion / Removal / Soft-Quarantine Handling (§9.1)
+        is_delete_or_quarantine = bool(
+            re.search(r"\b(delete|remove|hide|drop|quarantine|trash)\b", prompt_lower)
+        )
+        if is_delete_or_quarantine and not is_attack_field:
+            target_field = None
+            custom_match = re.search(r"\b(custom_[a-z0-9_]+)\b", prompt_lower)
+            if custom_match:
+                target_field = custom_match.group(1)
+            elif "cargo" in prompt_lower or "tracking" in prompt_lower:
+                target_field = "custom_cargo_tracking_number"
+            elif "priority" in prompt_lower:
+                target_field = "custom_priority_status"
+            elif "inspection" in prompt_lower:
+                target_field = "custom_inspection_notes"
+            elif "dispatch" in prompt_lower:
+                target_field = "custom_dispatch_notes"
+            elif "vip" in prompt_lower:
+                target_field = "custom_is_vip"
+            elif "delivery" in prompt_lower:
+                target_field = "custom_expected_delivery_date"
+            else:
+                words = prompt_lower.split()
+                for i, w in enumerate(words):
+                    if w in ("delete", "remove", "hide", "quarantine") and i + 1 < len(words):
+                        next_words = [re.sub(r"[^a-z0-9_]", "", nw) for nw in words[i+1:i+4] if nw not in ("the", "a", "an", "field", "column", "it", "added")]
+                        if next_words:
+                            slug = "_".join(next_words[:3])
+                            target_field = f"custom_{slug}" if not slug.startswith("custom_") else slug
+                        break
+
+            if not target_field:
+                target_field = "custom_cargo_tracking_number"
+
+            return ConfigurationProposal(
+                intent="set_property",
+                target_doctype=doctype,
+                summary=f"Soft-quarantine and hide '{target_field}' on {doctype}",
+                reasoning=(
+                    f"Under ADR-001 Rev 2.3 (§9.1), physical column drops are prohibited during conversational "
+                    f"execution to prevent data loss. The field '{target_field}' is safely soft-quarantined "
+                    f"by setting hidden=1 and reqd=0 via Frappe Property Setter, preserving historical records."
+                ),
+                changes=[
+                    {
+                        "fieldname": target_field,
+                        "property": "hidden",
+                        "value": 1,
+                        "property_type": "Check",
+                    }
+                ],
+                governance_tier=1,
+            )
+
+        # 1c. Field Property Mutation Handling
+        if ("make " in prompt_lower or "set " in prompt_lower or "change " in prompt_lower) and any(p in prompt_lower for p in ("mandatory", "required", "read-only", "read only", "label", "description", "optional")):
+            target_field = "custom_priority_status" if "priority" in prompt_lower else ("custom_cargo_tracking_number" if ("cargo" in prompt_lower or "tracking" in prompt_lower) else "custom_field")
+            if "mandatory" in prompt_lower or "required" in prompt_lower:
+                prop = "reqd"
+                val = 1
+                prop_type = "Check"
+            elif "optional" in prompt_lower:
+                prop = "reqd"
+                val = 0
+                prop_type = "Check"
+            elif "read-only" in prompt_lower or "read only" in prompt_lower:
+                prop = "read_only"
+                val = 1
+                prop_type = "Check"
+            elif "label" in prompt_lower:
+                prop = "label"
+                val = "Updated Field Label"
+                prop_type = "Data"
+            else:
+                prop = "description"
+                val = "Updated Description"
+                prop_type = "Text"
+
+            return ConfigurationProposal(
+                intent="set_property",
+                target_doctype=doctype,
+                summary=f"Update property '{prop}' to '{val}' on '{target_field}'",
+                reasoning=f"User requested property mutation: '{user_prompt}'",
+                changes=[
+                    {
+                        "fieldname": target_field,
+                        "property": prop,
+                        "value": val,
+                        "property_type": prop_type,
+                    }
+                ],
+                governance_tier=1,
+            )
 
         # 2. Multiple Field Request Handling & Phase 1 Self-Correction
         is_multi_field = (

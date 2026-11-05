@@ -893,6 +893,112 @@ class TestAIConfigurationPlanner(unittest.TestCase):
         self.assertIn("preview_data", result.validation)
         self.assertIsInstance(result.validation["preview_data"], list)
 
+    def test_23_conversational_field_deletion_request_proposes_soft_quarantine(self):
+        """
+        Verifies that when a user asks to delete/remove a custom field:
+        - Proposes intent='set_property' with property='hidden', value=1, property_type='Check'.
+        - Does NOT attempt an additive execute_single_field_deployment.
+        - ddl_plan specifies zero physical DDL.
+        - Adheres strictly to ADR-001 Rev 2.3 (§9.1) non-destructive quarantine contract.
+        """
+        planner = AIConfigurationPlanner(mock_mode=True)
+        result = planner.plan_change(
+            doctype="Sales Invoice",
+            user_prompt="delete cargo tracking number",
+        )
+
+        self.assertTrue(result.success, f"Expected success but got error: {result.error_message}")
+        self.assertIsNotNone(result.proposal)
+        self.assertEqual(result.proposal.intent, "set_property")
+        self.assertEqual(result.proposal.target_doctype, "Sales Invoice")
+        self.assertEqual(len(result.proposal.changes), 1)
+
+        change = result.proposal.changes[0]
+        self.assertEqual(change.get("fieldname"), "custom_cargo_tracking_number")
+        self.assertEqual(change.get("property"), "hidden")
+        self.assertEqual(change.get("value"), 1)
+        self.assertEqual(change.get("property_type"), "Check")
+
+        # Verify zero DDL plan inspection
+        self.assertIsNotNone(result.ddl_plan)
+        self.assertTrue(result.ddl_plan["inspectable"])
+        self.assertTrue(result.ddl_plan["is_approved_additive_only"])
+        self.assertIn("Zero DDL", result.ddl_plan["statements"][0])
+
+    def test_24_conversational_field_deletion_with_explicit_custom_prefix(self):
+        """
+        Verifies that user prompt referencing 'custom_cargo_tracking_number' is parsed correctly.
+        """
+        planner = AIConfigurationPlanner(mock_mode=True)
+        result = planner.plan_change(
+            doctype="Sales Invoice",
+            user_prompt="delete field custom_cargo_tracking_number it added previously",
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.proposal.intent, "set_property")
+        self.assertEqual(result.proposal.changes[0]["fieldname"], "custom_cargo_tracking_number")
+        self.assertEqual(result.proposal.changes[0]["property"], "hidden")
+        self.assertEqual(result.proposal.changes[0]["value"], 1)
+
+    def test_25_apply_configuration_change_routes_quarantine_without_ddl_conflict(self):
+        """
+        Verifies that apply_configuration_change successfully routes set_property/quarantine
+        without throwing 'Pre-existing field or divergence' even when the field already exists in DB.
+        """
+        from exrp.api.control_plane import FrappeDeploymentAdapter
+        FrappeDeploymentAdapter.reset_in_memory_state()
+        adapter = FrappeDeploymentAdapter()
+
+        # Step 1: Add custom field
+        add_res = apply_configuration_change(
+            doctype="Sales Invoice",
+            deployment_id="dep_add_cargo",
+            field_def={"fieldname": "custom_cargo_tracking_number", "label": "Cargo Tracking Number", "fieldtype": "Data"},
+            adapter=adapter,
+            user_roles=["System Manager"],
+        )
+        self.assertEqual(add_res["status"], "APPLIED")
+
+        # Step 2: Delete/quarantine field via apply_configuration_change with proposal intent set_property
+        proposal = {
+            "intent": "set_property",
+            "target_doctype": "Sales Invoice",
+            "summary": "Soft-quarantine custom_cargo_tracking_number",
+            "reasoning": "ADR-001 Rev 2.3 (§9.1) soft quarantine",
+            "changes": [
+                {
+                    "fieldname": "custom_cargo_tracking_number",
+                    "property": "hidden",
+                    "value": 1,
+                    "property_type": "Check",
+                }
+            ],
+        }
+
+        quarantine_res = apply_configuration_change(
+            doctype="Sales Invoice",
+            deployment_id="dep_quarantine_cargo",
+            proposal=proposal,
+            adapter=adapter,
+            user_roles=["System Manager"],
+        )
+
+        self.assertTrue(quarantine_res["success"], f"Quarantine failed: {quarantine_res}")
+        self.assertEqual(quarantine_res["status"], "APPLIED")
+        self.assertEqual(quarantine_res["disposition"], "CUSTOM_FIELD_QUARANTINED")
+        self.assertEqual(quarantine_res["fieldname"], "custom_cargo_tracking_number")
+        self.assertEqual(quarantine_res["property_name"], "hidden")
+
+        # Verify property setter exists
+        ps_hidden = adapter.get_property_setter("Sales Invoice", "custom_cargo_tracking_number", "hidden")
+        self.assertIsNotNone(ps_hidden)
+        self.assertEqual(ps_hidden["value"], 1)
+
+        ps_reqd = adapter.get_property_setter("Sales Invoice", "custom_cargo_tracking_number", "reqd")
+        self.assertIsNotNone(ps_reqd)
+        self.assertEqual(ps_reqd["value"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
