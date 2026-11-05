@@ -92,6 +92,8 @@
 
       this.createDOM();
       this.bindEvents();
+      this.setupNavbarThemeToggle();
+      this.syncNavbarLogo();
       this.updateContext();
       this.renderWelcomeMessage();
 
@@ -120,7 +122,9 @@
       this.launcherEl.setAttribute('type', 'button');
       this.launcherEl.setAttribute('aria-label', 'Open EXRP AI Sidecar');
       this.launcherEl.innerHTML = `
-        <span class="exrp-launcher-icon">✨</span>
+        <span class="exrp-launcher-brand-icon">
+          <img src="/assets/exrp/images/exrp-symbol.svg" alt="EXRP" class="exrp-brand-symbol-img" width="22" height="22">
+        </span>
         <span class="exrp-launcher-text">EXRP AI</span>
         <span class="exrp-launcher-badge" id="exrp-launcher-badge"></span>
       `;
@@ -142,13 +146,16 @@
         <!-- Drawer Header -->
         <div class="exrp-drawer-header">
           <div class="exrp-header-left">
-            <span class="exrp-header-icon">✨</span>
+            <span class="exrp-header-brand-icon">
+              <img src="/assets/exrp/images/exrp-symbol.svg" alt="EXRP" class="exrp-brand-symbol-img" width="24" height="24">
+            </span>
             <div>
               <div class="exrp-header-title">EXRP Configuration Copilot</div>
-              <div class="exrp-header-tagline">ADR-001 Rev 2.3 Safe Control Plane</div>
+              <div class="exrp-header-tagline">AI-Native Safe Control Plane</div>
             </div>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="exrp-btn-theme-toggle" id="exrp-sidecar-theme-toggle" title="Toggle System Dark/Light Mode" aria-label="Toggle Theme" style="background: none; border: 1px solid var(--border-color); cursor: pointer; font-size: 14px; padding: 3px 6px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-color); line-height: 1;">🌙</button>
             <button class="exrp-btn-settings" id="exrp-btn-settings" title="Configure LLM Provider & Settings (EXRP Settings)" style="background: none; border: 1px solid var(--border-color); cursor: pointer; font-size: 14px; padding: 3px 6px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-color); line-height: 1;">⚙️</button>
             <span class="exrp-doctype-badge" id="exrp-header-doctype-badge">Desk</span>
             <button class="exrp-btn-close" id="exrp-btn-close" title="Close Sidecar (Esc)">✕</button>
@@ -278,6 +285,14 @@
           if (window.frappe && typeof window.frappe.set_route === 'function') {
             window.frappe.set_route('List', dt);
           }
+        });
+      }
+
+      // Sidecar Header Theme Toggle
+      const sidecarThemeBtn = this.drawerEl.querySelector('#exrp-sidecar-theme-toggle');
+      if (sidecarThemeBtn) {
+        sidecarThemeBtn.addEventListener('click', () => {
+          this.toggleSystemTheme();
         });
       }
 
@@ -488,6 +503,8 @@
     onRouteOrContextChange() {
       const previousDocType = this.activeDocType;
       this.updateContext();
+      this.setupNavbarThemeToggle();
+      this.syncNavbarLogo();
       if (previousDocType !== this.activeDocType && this.activeDocType) {
         this.clearInPlaceFormPreview();
         this.appendSystemNotice(`Context switched to <strong>${escapeHtml(this.activeDocType)}</strong>.`);
@@ -499,6 +516,141 @@
       if (dt !== this.activeDocType) {
         this.onRouteOrContextChange();
       }
+      if (!document.getElementById('exrp-navbar-theme-toggle')) {
+        this.setupNavbarThemeToggle();
+      }
+    }
+
+    /**
+     * Injects or refreshes the 1-click Dark/Light Mode toggle in the Frappe Desk Navbar
+     */
+    setupNavbarThemeToggle() {
+      if (document.getElementById('exrp-navbar-theme-toggle')) {
+        this.updateThemeUIState();
+        return;
+      }
+
+      const navbarNav = document.querySelector('header .navbar ul.navbar-nav');
+      if (!navbarNav) {
+        return;
+      }
+
+      const isDark = this.isDarkModeActive();
+      const li = document.createElement('li');
+      li.className = 'nav-item exrp-theme-toggle-nav-item';
+      li.id = 'exrp-navbar-theme-toggle';
+      li.innerHTML = `
+        <button type="button" class="btn-reset nav-link exrp-theme-toggle-btn" id="exrp-theme-toggle-btn" title="${isDark ? 'Switch to Frappe Light' : 'Switch to Dark Mode (Timeless Night)'}" aria-label="Toggle Dark / Light Mode">
+          <span class="exrp-theme-toggle-icon">${isDark ? '☀️' : '🌙'}</span>
+        </button>
+      `;
+
+      // Insert before user dropdown or help dropdown if present
+      const userDropdown = navbarNav.querySelector('.dropdown-navbar-user') || navbarNav.querySelector('.dropdown-help');
+      if (userDropdown) {
+        navbarNav.insertBefore(li, userDropdown);
+      } else {
+        navbarNav.appendChild(li);
+      }
+
+      const btn = li.querySelector('#exrp-theme-toggle-btn');
+      if (btn) {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.toggleSystemTheme();
+        });
+      }
+
+      this.updateThemeUIState();
+      this.syncNavbarLogo();
+    }
+
+    /**
+     * Checks if dark mode is active on document root or system preference
+     */
+    isDarkModeActive() {
+      const mode = document.documentElement.getAttribute('data-theme-mode') || document.documentElement.getAttribute('data-theme');
+      if (mode === 'dark') return true;
+      if (mode === 'light') return false;
+      return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+
+    /**
+     * Toggles system theme between Light and Dark mode across Desk, Sidecar, and User profile
+     */
+    toggleSystemTheme() {
+      const currentlyDark = this.isDarkModeActive();
+      const targetMode = currentlyDark ? 'light' : 'dark';
+      const frappeThemeName = currentlyDark ? 'Light' : 'Dark';
+
+      // 1. Update DOM attributes immediately
+      document.documentElement.setAttribute('data-theme', targetMode);
+      document.documentElement.setAttribute('data-theme-mode', targetMode);
+      if (targetMode === 'dark') {
+        document.body.classList.add('dark');
+      } else {
+        document.body.classList.remove('dark');
+      }
+
+      // 2. Persist in localStorage
+      try {
+        localStorage.setItem('frappe_theme', targetMode);
+        localStorage.setItem('theme', targetMode);
+      } catch (err) {}
+
+      // 3. Persist to Frappe backend User Document
+      if (window.frappe && window.frappe.xcall) {
+        window.frappe.xcall('frappe.core.doctype.user.user.switch_theme', { theme: frappeThemeName })
+          .catch(() => {});
+      }
+
+      // 4. Update UI icons & logo
+      this.updateThemeUIState();
+      this.syncNavbarLogo();
+
+      // 5. User feedback
+      if (window.frappe && window.frappe.show_alert) {
+        window.frappe.show_alert({
+          message: targetMode === 'dark' ? 'Switched to Dark Mode (Timeless Night)' : 'Switched to Frappe Light Mode',
+          indicator: 'green'
+        }, 2.5);
+      }
+    }
+
+    /**
+     * Updates button icons and tooltips in navbar and sidecar
+     */
+    updateThemeUIState() {
+      const isDark = this.isDarkModeActive();
+      const navBtn = document.getElementById('exrp-theme-toggle-btn');
+      if (navBtn) {
+        const iconSpan = navBtn.querySelector('.exrp-theme-toggle-icon');
+        if (iconSpan) iconSpan.textContent = isDark ? '☀️' : '🌙';
+        navBtn.setAttribute('title', isDark ? 'Switch to Frappe Light' : 'Switch to Dark Mode (Timeless Night)');
+      }
+
+      const sidecarThemeBtn = document.getElementById('exrp-sidecar-theme-toggle');
+      if (sidecarThemeBtn) {
+        sidecarThemeBtn.textContent = isDark ? '☀️' : '🌙';
+        sidecarThemeBtn.setAttribute('title', isDark ? 'Switch to Frappe Light' : 'Switch to Dark Mode (Timeless Night)');
+      }
+    }
+
+    /**
+     * Dynamically swaps navbar app logo and sidecar brand icon between Light & Dark variants
+     */
+    syncNavbarLogo() {
+      const isDark = this.isDarkModeActive();
+      const logoImgs = document.querySelectorAll('.navbar .app-logo, .navbar-brand .app-logo');
+      logoImgs.forEach(img => {
+        img.src = isDark ? '/assets/exrp/images/exrp-logo-dark.svg' : '/assets/exrp/images/exrp-logo.svg';
+      });
+
+      const symbolImgs = document.querySelectorAll('.exrp-brand-symbol-img');
+      symbolImgs.forEach(img => {
+        img.src = isDark ? '/assets/exrp/images/exrp-symbol-dark.svg' : '/assets/exrp/images/exrp-symbol.svg';
+      });
     }
 
     /**

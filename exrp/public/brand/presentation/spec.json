@@ -1,0 +1,51 @@
+{
+  "brand": "EXRP",
+  "deck_title": "Final logo presentation",
+  "tagline": "Configure by conversation",
+  "brief": "An AI-assisted configuration control plane that lets non-technical business operators change ERP and CRM data models, layouts and workflows through conversation, without compromising compliance, security or uptime.",
+  "adjectives": [
+    "simple",
+    "trustworthy",
+    "live",
+    "approachable"
+  ],
+  "criteria": "Success: simple, clean and modern; distinct from blue enterprise software; recognisable at 16 px; works in one colour.",
+  "industry": "saas",
+  "nav": [
+    "Product",
+    "Security",
+    "Pricing"
+  ],
+  "brand_color": "#0B3D36",
+  "tile_color": "#0B3D36",
+  "greyscale": false,
+  "final": true,
+  "designer": "Claude",
+  "concepts": [
+    {
+      "name": "Talk Switch",
+      "symbol": "../symbol/exrp-symbol-color.svg",
+      "lockup": "../lockups/exrp-horizontal-color.svg",
+      "stacked": "../lockups/exrp-stacked-color.svg",
+      "symbol_on_tile": "../symbol/exrp-symbol-mint-reversed.svg",
+      "lockup_on_tile": "../lockups/exrp-horizontal-reversed.svg",
+      "stacked_on_tile": "../lockups/exrp-stacked-reversed.svg",
+      "symbol_on_dark": "../symbol/exrp-symbol-mint-reversed.svg",
+      "lockup_on_dark": "../lockups/exrp-horizontal-reversed.svg",
+      "stacked_on_dark": "../lockups/exrp-stacked-reversed.svg",
+      "idea": "A speech bubble that is also a switch: say it, and it's set.",
+      "rationale": [
+        "Shows the whole product in one shape: a conversation that sets a live configuration",
+        "The mint knob marks the live, switched-on state and stays calm against deep pine",
+        "Green stands apart from the blue used widely across enterprise software",
+        "The pill matches the wordmark's height, and the tail drops below the baseline with the p"
+      ]
+    }
+  ],
+  "recommendation": "Talk Switch: one clear idea that non-technical operators understand at a glance.",
+  "next_steps": [
+    "Run a professional trademark search",
+    "Confirm print colours against a physical Pantone guide",
+    "Roll out to product, website and sales materials"
+  ]
+}

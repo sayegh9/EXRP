@@ -1250,6 +1250,24 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
         ],
     )
 
+    # 25. Apply EXRP Official Brand and Logo Settings
+    try:
+        navbar_settings = frappe.get_single("Navbar Settings")
+        navbar_settings.app_logo = "/assets/exrp/images/exrp-logo.svg"
+        navbar_settings.save(ignore_permissions=True)
+    except Exception as e:
+        frappe.log_error(f"Error updating Navbar Settings logo: {e}")
+
+    try:
+        website_settings = frappe.get_single("Website Settings")
+        website_settings.app_logo = "/assets/exrp/images/exrp-logo.svg"
+        website_settings.splash_image = "/assets/exrp/images/exrp-logo.svg"
+        website_settings.favicon = "/assets/exrp/images/favicon.svg"
+        website_settings.brand_html = '<img src="/assets/exrp/images/exrp-logo.svg" style="height: 28px;" alt="EXRP">'
+        website_settings.save(ignore_permissions=True)
+    except Exception as e:
+        frappe.log_error(f"Error updating Website Settings logo: {e}")
+
     frappe.db.commit()
 
     # Collect total counts per DocType for reporting

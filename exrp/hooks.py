@@ -19,6 +19,15 @@ app_include_css = [
     "/assets/exrp/css/ai_sidecar.css"
 ]
 
+# EXRP Official Brand Assets & Logos
+app_logo_url = "/assets/exrp/images/exrp-logo.svg"
+favicon = "/assets/exrp/images/favicon.svg"
+
+website_context = {
+    "favicon": "/assets/exrp/images/favicon.svg",
+    "splash_image": "/assets/exrp/images/exrp-logo.svg",
+}
+
 # Supported Document Lifecycle hooks for Runtime Policy Enforcement (§4.2)
 # Applies to supported application write paths (Desk, REST Document API, and background jobs)
 doc_events = {

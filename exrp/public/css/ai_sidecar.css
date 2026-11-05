@@ -4,10 +4,12 @@
  */
 
 :root {
-  --exrp-primary: var(--primary, #2490ef);
-  --exrp-primary-hover: #1b74c2;
-  --exrp-primary-light: rgba(36, 144, 239, 0.1);
-  --exrp-primary-glow: rgba(36, 144, 239, 0.35);
+  --exrp-pine: #0B3D36;
+  --exrp-mint: #35E3A1;
+  --exrp-primary: #0B3D36;
+  --exrp-primary-hover: #072a25;
+  --exrp-primary-light: rgba(53, 227, 161, 0.12);
+  --exrp-primary-glow: rgba(53, 227, 161, 0.35);
   --exrp-bg: var(--card-bg, var(--fg-color, #ffffff));
   --exrp-surface: var(--gray-50, #f8fafc);
   --exrp-surface-hover: var(--gray-100, #f1f5f9);
@@ -15,9 +17,9 @@
   --exrp-text: var(--text-color, #1e293b);
   --exrp-text-muted: var(--text-muted, #64748b);
   --exrp-text-light: var(--text-light, #94a3b8);
-  --exrp-code-bg: #0f172a;
-  --exrp-code-text: #38bdf8;
-  --exrp-code-border: #1e293b;
+  --exrp-code-bg: #0B3D36;
+  --exrp-code-text: #35E3A1;
+  --exrp-code-border: #13534b;
   --exrp-success: #10b981;
   --exrp-success-light: #ecfdf5;
   --exrp-success-border: #a7f3d0;
@@ -27,9 +29,9 @@
   --exrp-warning: #f59e0b;
   --exrp-warning-light: #fffbeb;
   --exrp-warning-border: #fde68a;
-  --exrp-shadow-drawer: -8px 0 32px rgba(0, 0, 0, 0.14);
+  --exrp-shadow-drawer: -8px 0 32px rgba(11, 61, 54, 0.12);
   --exrp-shadow-card: 0 4px 16px rgba(0, 0, 0, 0.06);
-  --exrp-shadow-launcher: 0 6px 20px var(--exrp-primary-glow);
+  --exrp-shadow-launcher: 0 6px 20px rgba(11, 61, 54, 0.25);
   --exrp-radius-sm: 6px;
   --exrp-radius-md: 10px;
   --exrp-radius-lg: 14px;
@@ -37,28 +39,116 @@
   --exrp-transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Frappe Dark Mode Overrides */
+/* Frappe Dark Mode Overrides (Pine & Mint High-Contrast Inversion) */
 [data-theme="dark"],
 body.dark,
 [data-theme-mode="dark"] {
-  --exrp-bg: #111827;
-  --exrp-surface: #1f2937;
-  --exrp-surface-hover: #374151;
-  --exrp-border: #374151;
-  --exrp-text: #f9fafb;
-  --exrp-text-muted: #9ca3af;
-  --exrp-text-light: #6b7280;
-  --exrp-code-bg: #030712;
-  --exrp-code-text: #7dd3fc;
-  --exrp-code-border: #1f2937;
-  --exrp-success-light: rgba(16, 185, 129, 0.15);
-  --exrp-success-border: rgba(16, 185, 129, 0.3);
+  --exrp-pine: #0B3D36;
+  --exrp-mint: #35E3A1;
+  --exrp-primary: #35E3A1;
+  --exrp-primary-hover: #4df4b2;
+  --exrp-primary-light: rgba(53, 227, 161, 0.16);
+  --exrp-primary-glow: rgba(53, 227, 161, 0.45);
+  --exrp-bg: #0b1513;
+  --exrp-surface: #11201d;
+  --exrp-surface-hover: #182e2a;
+  --exrp-border: #1b3530;
+  --exrp-text: #f0fdf9;
+  --exrp-text-muted: #8ba8a1;
+  --exrp-text-light: #5f7a73;
+  --exrp-code-bg: #060e0c;
+  --exrp-code-text: #35E3A1;
+  --exrp-code-border: #1b3530;
+  --exrp-success: #35E3A1;
+  --exrp-success-light: rgba(53, 227, 161, 0.15);
+  --exrp-success-border: rgba(53, 227, 161, 0.3);
   --exrp-danger-light: rgba(239, 68, 68, 0.15);
   --exrp-danger-border: rgba(239, 68, 68, 0.3);
   --exrp-warning-light: rgba(245, 158, 11, 0.15);
   --exrp-warning-border: rgba(245, 158, 11, 0.3);
-  --exrp-shadow-drawer: -8px 0 32px rgba(0, 0, 0, 0.5);
-  --exrp-shadow-card: 0 4px 16px rgba(0, 0, 0, 0.25);
+  --exrp-shadow-drawer: -8px 0 32px rgba(0, 0, 0, 0.6);
+  --exrp-shadow-card: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* ==========================================================================
+   EXRP Official Brand Identity & Logo Styles
+   ========================================================================== */
+.navbar-brand .app-logo,
+.navbar .app-logo {
+  height: 28px !important;
+  width: auto !important;
+  max-width: 140px !important;
+  object-fit: contain !important;
+  display: inline-block !important;
+  vertical-align: middle !important;
+  transition: opacity 0.2s ease;
+}
+
+[data-theme="dark"] .navbar .app-logo,
+[data-theme-mode="dark"] .navbar .app-logo,
+body.dark .navbar .app-logo {
+  content: url("/assets/exrp/images/exrp-logo-dark.svg") !important;
+}
+
+[data-theme="light"] .navbar .app-logo,
+:root:not([data-theme="dark"]):not([data-theme-mode="dark"]) .navbar .app-logo {
+  content: url("/assets/exrp/images/exrp-logo.svg") !important;
+}
+
+/* Desk Navbar Quick Theme Toggle Button */
+.exrp-theme-toggle-nav-item {
+  display: flex !important;
+  align-items: center !important;
+  margin-right: 8px !important;
+}
+
+.exrp-theme-toggle-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: var(--border-radius, 8px) !important;
+  border: 1px solid var(--border-color, #e2e8f0) !important;
+  background: var(--control-bg, transparent) !important;
+  color: var(--text-color, #1e293b) !important;
+  cursor: pointer !important;
+  font-size: 15px !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  padding: 0 !important;
+  line-height: 1 !important;
+}
+
+.exrp-theme-toggle-btn:hover {
+  background: var(--gray-100, #f1f5f9) !important;
+  border-color: #35E3A1 !important;
+  transform: scale(1.05);
+}
+
+[data-theme="dark"] .exrp-theme-toggle-btn:hover,
+[data-theme-mode="dark"] .exrp-theme-toggle-btn:hover {
+  background: rgba(53, 227, 161, 0.15) !important;
+  border-color: #35E3A1 !important;
+}
+
+/* Sidecar brand symbol image */
+.exrp-brand-symbol-img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  vertical-align: middle;
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+
+.exrp-sidecar-launcher:hover .exrp-brand-symbol-img {
+  transform: rotate(15deg) scale(1.1);
+}
+
+[data-theme="dark"] .exrp-brand-symbol-img,
+[data-theme-mode="dark"] .exrp-brand-symbol-img,
+body.dark .exrp-brand-symbol-img {
+  content: url("/assets/exrp/images/exrp-symbol-dark.svg") !important;
 }
 
 /* ==========================================================================
@@ -100,10 +190,12 @@ body.dark,
   transform: translateY(0) scale(0.98);
 }
 
+.exrp-launcher-brand-icon,
 .exrp-launcher-icon {
   font-size: 16px;
-  display: inline-block;
-  animation: exrp-sparkle-float 3s infinite ease-in-out;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .exrp-launcher-text {
