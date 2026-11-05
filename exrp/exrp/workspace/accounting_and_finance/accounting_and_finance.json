@@ -1,0 +1,92 @@
+{
+ "charts": [],
+ "content": "[{\"id\": \"hdr_sc_Accoun\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Quick Access & Live Counts</b></span>\", \"col\": 12}}, {\"id\": \"sc_0_Sales_In\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Sales Invoice\", \"col\": 3}}, {\"id\": \"sc_1_Payment_\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Payment Entry\", \"col\": 3}}, {\"id\": \"sc_2_GL_Entry\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"GL Entry\", \"col\": 3}}, {\"id\": \"spc_main\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"hdr_cards\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>ERP Modules & Masters</b></span>\", \"col\": 12}}, {\"id\": \"crd_0_Ledgers_\", \"type\": \"card\", \"data\": {\"card_name\": \"Ledgers and Billing\", \"col\": 4}}]",
+ "creation": "2026-11-05 15:39:23.957081",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "hide_custom": 0,
+ "icon": "accounting",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Accounting and Finance",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Ledgers and Billing",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Sales Invoice",
+   "link_count": 0,
+   "link_to": "Sales Invoice",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Payment Entry",
+   "link_count": 0,
+   "link_to": "Payment Entry",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "GL Entry",
+   "link_count": 0,
+   "link_to": "GL Entry",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-11-05 15:43:22.861650",
+ "modified_by": "Administrator",
+ "module": "EXRP",
+ "name": "Accounting and Finance",
+ "number_cards": [],
+ "owner": "Administrator",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 0.5,
+ "shortcuts": [
+  {
+   "color": "Red",
+   "doc_view": "List",
+   "label": "Sales Invoice",
+   "link_to": "Sales Invoice",
+   "stats_filter": "{}",
+   "type": "DocType"
+  },
+  {
+   "color": "Green",
+   "doc_view": "List",
+   "label": "Payment Entry",
+   "link_to": "Payment Entry",
+   "stats_filter": "{}",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "GL Entry",
+   "link_to": "GL Entry",
+   "stats_filter": "{}",
+   "type": "DocType"
+  }
+ ],
+ "title": "Accounting and Finance"
+}
