@@ -877,6 +877,204 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
 
     frappe.db.commit()
 
+    # 22. Provision Frappe Desk Workspaces so the full ERP appears in the left sidebar
+    import json
+
+    def _upsert_workspace(
+        ws_name: str,
+        title: str,
+        icon: str,
+        seq: float,
+        shortcuts: List[Dict[str, Any]],
+        cards: List[Dict[str, Any]],
+    ) -> None:
+        content_blocks: List[Dict[str, Any]] = [
+            {
+                "id": f"hdr_sc_{ws_name[:6].replace(' ', '_')}",
+                "type": "header",
+                "data": {"text": '<span class="h4"><b>Quick Access & Live Counts</b></span>', "col": 12},
+            }
+        ]
+        ws_shortcuts: List[Dict[str, Any]] = []
+        for idx, sc in enumerate(shortcuts):
+            sc_label = sc["label"]
+            content_blocks.append({
+                "id": f"sc_{idx}_{sc_label[:8].replace(' ', '_')}",
+                "type": "shortcut",
+                "data": {"shortcut_name": sc_label, "col": 3},
+            })
+            ws_shortcuts.append({
+                "label": sc_label,
+                "type": "DocType",
+                "link_to": sc["link_to"],
+                "doc_view": sc.get("doc_view", "List"),
+                "color": sc.get("color", "Blue"),
+                "stats_filter": sc.get("stats_filter", "{}"),
+            })
+
+        content_blocks.append({"id": "spc_main", "type": "spacer", "data": {"col": 12}})
+        content_blocks.append({
+            "id": "hdr_cards",
+            "type": "header",
+            "data": {"text": '<span class="h4"><b>ERP Modules & Masters</b></span>', "col": 12},
+        })
+
+        ws_links: List[Dict[str, Any]] = []
+        for c_idx, card in enumerate(cards):
+            card_title = card["title"]
+            content_blocks.append({
+                "id": f"crd_{c_idx}_{card_title[:8].replace(' ', '_')}",
+                "type": "card",
+                "data": {"card_name": card_title, "col": 4},
+            })
+            ws_links.append({
+                "label": card_title,
+                "type": "Card Break",
+                "hidden": 0,
+            })
+            for item_dt in card["doctypes"]:
+                ws_links.append({
+                    "label": item_dt,
+                    "type": "Link",
+                    "link_type": "DocType",
+                    "link_to": item_dt,
+                    "hidden": 0,
+                })
+
+        if frappe.db.exists("Workspace", ws_name):
+            ws_doc = frappe.get_doc("Workspace", ws_name)
+            ws_doc.title = title
+            ws_doc.icon = icon
+            ws_doc.sequence_id = seq
+            ws_doc.public = 1
+            ws_doc.is_hidden = 0
+            ws_doc.module = "EXRP"
+            ws_doc.content = json.dumps(content_blocks)
+            ws_doc.set("shortcuts", ws_shortcuts)
+            ws_doc.set("links", ws_links)
+            ws_doc.save(ignore_permissions=True)
+        else:
+            ws_doc = frappe.get_doc({
+                "doctype": "Workspace",
+                "name": ws_name,
+                "label": ws_name,
+                "title": title,
+                "icon": icon,
+                "sequence_id": seq,
+                "public": 1,
+                "is_hidden": 0,
+                "module": "EXRP",
+                "content": json.dumps(content_blocks),
+                "shortcuts": ws_shortcuts,
+                "links": ws_links,
+            })
+            ws_doc.insert(ignore_permissions=True)
+
+    _upsert_workspace(
+        ws_name="EXRP Enterprise ERP",
+        title="EXRP Enterprise ERP",
+        icon="organization",
+        seq=0.1,
+        shortcuts=[
+            {"label": "Sales Orders", "link_to": "Sales Order", "color": "Blue"},
+            {"label": "Purchase Orders", "link_to": "Purchase Order", "color": "Orange"},
+            {"label": "Customers", "link_to": "Customer", "color": "Green"},
+            {"label": "Sales Invoices", "link_to": "Sales Invoice", "color": "Red"},
+            {"label": "Inventory Items", "link_to": "Item", "color": "Cyan"},
+            {"label": "Projects", "link_to": "Project", "color": "Yellow"},
+            {"label": "Expense Claims", "link_to": "Expense Claim", "color": "Pink"},
+            {"label": "EXRP AI Settings", "link_to": "EXRP Settings", "doc_view": "", "color": "Grey"},
+        ],
+        cards=[
+            {"title": "Selling & CRM", "doctypes": ["Sales Order", "Quotation", "Delivery Note", "Customer", "Opportunity", "Lead"]},
+            {"title": "Buying & Procurement", "doctypes": ["Purchase Order", "Material Request", "Purchase Receipt", "Supplier"]},
+            {"title": "Inventory & Warehousing", "doctypes": ["Item", "Warehouse", "Stock Ledger Entry"]},
+            {"title": "Accounting & Finance", "doctypes": ["Sales Invoice", "Payment Entry", "GL Entry"]},
+            {"title": "HR & Projects", "doctypes": ["Employee", "Expense Claim", "Project"]},
+            {"title": "EXRP AI Control Plane", "doctypes": ["EXRP Settings", "Custom Field", "Property Setter", "Workflow", "Report"]},
+        ],
+    )
+
+    _upsert_workspace(
+        ws_name="Selling and CRM",
+        title="Selling & CRM",
+        icon="retail",
+        seq=0.2,
+        shortcuts=[
+            {"label": "Sales Order", "link_to": "Sales Order", "color": "Blue"},
+            {"label": "Quotation", "link_to": "Quotation", "color": "Cyan"},
+            {"label": "Delivery Note", "link_to": "Delivery Note", "color": "Green"},
+            {"label": "Customer", "link_to": "Customer", "color": "Orange"},
+        ],
+        cards=[
+            {"title": "Sales Transactions", "doctypes": ["Sales Order", "Quotation", "Delivery Note"]},
+            {"title": "CRM Pipeline", "doctypes": ["Lead", "Opportunity", "Customer"]},
+        ],
+    )
+
+    _upsert_workspace(
+        ws_name="Buying and Procurement",
+        title="Buying & Procurement",
+        icon="buying",
+        seq=0.3,
+        shortcuts=[
+            {"label": "Purchase Order", "link_to": "Purchase Order", "color": "Orange"},
+            {"label": "Material Request", "link_to": "Material Request", "color": "Yellow"},
+            {"label": "Purchase Receipt", "link_to": "Purchase Receipt", "color": "Green"},
+            {"label": "Supplier", "link_to": "Supplier", "color": "Blue"},
+        ],
+        cards=[
+            {"title": "Procurement Cycle", "doctypes": ["Material Request", "Purchase Order", "Purchase Receipt", "Supplier"]},
+        ],
+    )
+
+    _upsert_workspace(
+        ws_name="Inventory and Stock",
+        title="Inventory & Stock",
+        icon="stock",
+        seq=0.4,
+        shortcuts=[
+            {"label": "Item", "link_to": "Item", "color": "Cyan"},
+            {"label": "Warehouse", "link_to": "Warehouse", "color": "Blue"},
+            {"label": "Stock Ledger Entry", "link_to": "Stock Ledger Entry", "color": "Grey"},
+        ],
+        cards=[
+            {"title": "Stock & Warehouses", "doctypes": ["Item", "Warehouse", "Stock Ledger Entry"]},
+        ],
+    )
+
+    _upsert_workspace(
+        ws_name="Accounting and Finance",
+        title="Accounting & Finance",
+        icon="accounting",
+        seq=0.5,
+        shortcuts=[
+            {"label": "Sales Invoice", "link_to": "Sales Invoice", "color": "Red"},
+            {"label": "Payment Entry", "link_to": "Payment Entry", "color": "Green"},
+            {"label": "GL Entry", "link_to": "GL Entry", "color": "Grey"},
+        ],
+        cards=[
+            {"title": "Ledgers & Billing", "doctypes": ["Sales Invoice", "Payment Entry", "GL Entry"]},
+        ],
+    )
+
+    _upsert_workspace(
+        ws_name="HR and Projects",
+        title="HR & Projects",
+        icon="hr",
+        seq=0.6,
+        shortcuts=[
+            {"label": "Employee", "link_to": "Employee", "color": "Blue"},
+            {"label": "Expense Claim", "link_to": "Expense Claim", "color": "Orange"},
+            {"label": "Project", "link_to": "Project", "color": "Green"},
+        ],
+        cards=[
+            {"title": "People & Delivery", "doctypes": ["Employee", "Expense Claim", "Project"]},
+        ],
+    )
+
+    frappe.db.commit()
+
     # Collect total counts per DocType for reporting
     summary_counts = {}
     for spec in doctype_specs:
@@ -888,4 +1086,12 @@ def ensure_demo_erp_doctypes() -> Dict[str, Any]:
         "created_doctypes": created_doctypes,
         "seeded_records_count": len(seeded_records),
         "doctype_counts": summary_counts,
+        "workspaces": [
+            "EXRP Enterprise ERP",
+            "Selling and CRM",
+            "Buying and Procurement",
+            "Inventory and Stock",
+            "Accounting and Finance",
+            "HR and Projects",
+        ],
     }
